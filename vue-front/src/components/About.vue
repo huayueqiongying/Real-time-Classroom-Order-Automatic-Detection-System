@@ -6,7 +6,7 @@
 <h3>核心技术</h3>
 <ul>
   <li><strong>多摄像头融合</strong>：支持摄像头实时接入，低延迟直播</li>
-  <li><strong>AI行为分析</strong>：通过AI识别举手、离座、使用手机等行为</li>
+  <li><strong>AI行为分析</strong>：通过AI识别交谈、离座、使用手机等行为</li>
   <li><strong>物联网集成</strong>：联动教室监控等教室设备</li>
 </ul>
 
