@@ -1,7 +1,7 @@
 <template>
   <div class="profile">
-    <h2>个人信息</h2>
-    <p>这里是个人信息页面</p>
+    <h2>添加个人信息</h2>
+    <p>这里是添加个人信息页面</p>
   </div>
 </template>
 
