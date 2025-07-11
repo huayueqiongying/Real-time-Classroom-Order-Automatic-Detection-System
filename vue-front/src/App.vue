@@ -1,11 +1,10 @@
 <template>
   <div id="app">
     <!-- 导航栏只在不登录/注册页面显示 -->
-    <div v-if="showNavigation">
-      <router-link to="/">首页</router-link> |
-      <router-link to="/about">关于</router-link> |
+    <div v-if="showNavigation" class="nav-container">
+      <router-link to="/">首页</router-link>
+      <router-link to="/about">关于</router-link>
       <router-link to="/login" v-if="!isAuthenticated">登录</router-link>
-      <template v-if="!isAuthenticated"> | </template>
       <router-link to="/register" v-if="!isAuthenticated">注册</router-link>
       <a href="#" @click.prevent="logout" v-if="isAuthenticated">退出</a>
     </div>
@@ -13,15 +12,7 @@
     <!-- 主内容区域 -->
     <router-view/>
 
-    <!-- 原测试内容可以保留或移除 -->
-    <template v-if="$route.path === '/'">
-      <h1>{{ title }}</h1>
-      <img src="./assets/logo.png">
-      <button @click="changeTitle">修改标题</button>
-      <p>计数器: {{ count }}</p>
-      <button @click="increment">+1</button>
-      <HelloWorld msg="这是子组件"/>
-    </template>
+    <!-- 移除原测试内容 -->
   </div>
 </template>
 
@@ -65,43 +56,66 @@ export default {
 <style>
 #app {
   font-family: 'Avenir', Helvetica, Arial, sans-serif;
-  text-align: center;
   color: #2c3e50;
-  margin-top: 60px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
+/* 新增导航栏样式 */
+.nav-container {
+  padding: 15px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  margin-bottom: 30px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+}
+
+/* 更新导航链接样式 */
+a {
+  color: #34495e;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+a:hover {
+  background-color: #f5f5f5;
+  color: #42b983;
+}
+
+/* 更新按钮样式 */
 button {
-  padding: 8px 16px;
+  padding: 10px 20px;
   margin: 0 5px;
   background-color: #42b983;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
 }
 
 button:hover {
   background-color: #369f6e;
 }
 
-/* 导航链接样式 */
-a {
-  color: #42b983;
-  text-decoration: none;
-  margin: 0 5px;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
 /* 登录/注册页面容器样式 */
 .auth-container {
   max-width: 400px;
   margin: 30px auto;
-  padding: 20px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  padding: 25px;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  background: white;
 }
+
+/* 移除原有的竖线分隔符，改用gap间距 */
 </style>

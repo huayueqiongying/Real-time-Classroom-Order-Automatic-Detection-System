@@ -74,7 +74,7 @@ export default {
       alert('登录成功！')
 
       // 登录成功后可以跳转到主页
-      // this.$router.push('/home')
+      this.$router.push('/dashboard')
 
       // 或者更新父组件的登录状态
       // this.$parent.isAuthenticated = true
