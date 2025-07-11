@@ -46,16 +46,24 @@ export default {
       isError: false,
       startX: 0,
       tolerance: 10, // 允许的误差范围
-      maxSliderPosition: 0
+      maxSliderPosition: 0,
+      currentPuzzleType: 'square', // 当前拼图类型
+      puzzleTypes: ['square', 'circle', 'triangle', 'star', 'heart', 'diamond'], // 可用的拼图类型
+      backgroundTypes: ['gradient1', 'gradient2', 'pattern1', 'pattern2', 'geometric', 'dots'] // 背景类型
     }
   },
   computed: {
     puzzleStyle() {
-      // 拼图块从左边开始，跟随滑块移动
       return {
         left: this.sliderPosition + 'px',
         backgroundImage: `url(${this.bgImage})`,
-        backgroundPosition: `-${this.puzzlePosition}px 0px`
+        backgroundPosition: `-${this.puzzlePosition}px 0px`,
+        maskImage: `url(${this.getPuzzleMask()})`,
+        WebkitMaskImage: `url(${this.getPuzzleMask()})`,
+        maskSize: '50px 50px',
+        WebkitMaskSize: '50px 50px',
+        maskRepeat: 'no-repeat',
+        WebkitMaskRepeat: 'no-repeat'
       }
     }
   },
@@ -65,46 +73,258 @@ export default {
   },
   methods: {
     initCaptcha() {
-      // 先生成拼图位置，再生成背景图片
+      // 随机选择拼图类型和背景类型
+      this.currentPuzzleType = this.puzzleTypes[Math.floor(Math.random() * this.puzzleTypes.length)]
       this.puzzlePosition = Math.random() * 200 + 50 // 50-250px之间
       this.generateBackground()
       this.resetSlider()
     },
 
     generateBackground() {
-      // 创建一个简单的渐变背景图片
       const canvas = document.createElement('canvas')
       canvas.width = 300
       canvas.height = 150
       const ctx = canvas.getContext('2d')
 
-      // 创建渐变背景
+      // 随机选择背景类型
+      const bgType = this.backgroundTypes[Math.floor(Math.random() * this.backgroundTypes.length)]
+
+      switch(bgType) {
+        case 'gradient1':
+          this.createGradientBackground(ctx, ['#667eea', '#764ba2'])
+          break
+        case 'gradient2':
+          this.createGradientBackground(ctx, ['#ff9a9e', '#fecfef'])
+          break
+        case 'pattern1':
+          this.createPatternBackground(ctx, '#4facfe', '#00f2fe')
+          break
+        case 'pattern2':
+          this.createPatternBackground(ctx, '#43e97b', '#38f9d7')
+          break
+        case 'geometric':
+          this.createGeometricBackground(ctx)
+          break
+        case 'dots':
+          this.createDotsBackground(ctx)
+          break
+      }
+
+      // 绘制拼图缺口
+      this.drawPuzzleHole(ctx)
+      this.bgImage = canvas.toDataURL()
+    },
+
+    createGradientBackground(ctx, colors) {
+      const gradient = ctx.createLinearGradient(0, 0, 300, 150)
+      gradient.addColorStop(0, colors[0])
+      gradient.addColorStop(1, colors[1])
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, 300, 150)
+    },
+
+    createPatternBackground(ctx, color1, color2) {
+      // 创建条纹背景
+      const gradient = ctx.createLinearGradient(0, 0, 300, 150)
+      gradient.addColorStop(0, color1)
+      gradient.addColorStop(1, color2)
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, 300, 150)
+
+      // 添加波浪效果
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+      ctx.lineWidth = 2
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath()
+        ctx.moveTo(0, 30 * i)
+        for (let x = 0; x < 300; x += 10) {
+          ctx.lineTo(x, 30 * i + Math.sin(x * 0.02) * 10)
+        }
+        ctx.stroke()
+      }
+    },
+
+    createGeometricBackground(ctx) {
+      // 几何图形背景
       const gradient = ctx.createLinearGradient(0, 0, 300, 150)
       gradient.addColorStop(0, '#667eea')
       gradient.addColorStop(1, '#764ba2')
       ctx.fillStyle = gradient
       ctx.fillRect(0, 0, 300, 150)
 
-      // 添加一些随机圆点装饰
-      for (let i = 0; i < 20; i++) {
+      // 添加几何图形
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'
+      for (let i = 0; i < 10; i++) {
+        const x = Math.random() * 300
+        const y = Math.random() * 150
+        const size = Math.random() * 20 + 10
+
+        if (Math.random() > 0.5) {
+          // 圆形
+          ctx.beginPath()
+          ctx.arc(x, y, size, 0, 2 * Math.PI)
+          ctx.fill()
+        } else {
+          // 矩形
+          ctx.fillRect(x, y, size, size)
+        }
+      }
+    },
+
+    createDotsBackground(ctx) {
+      // 点状背景
+      const gradient = ctx.createRadialGradient(150, 75, 0, 150, 75, 200)
+      gradient.addColorStop(0, '#a8edea')
+      gradient.addColorStop(1, '#fed6e3')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, 300, 150)
+
+      // 添加点状装饰
+      for (let i = 0; i < 30; i++) {
         ctx.beginPath()
         ctx.arc(
           Math.random() * 300,
           Math.random() * 150,
-          Math.random() * 5 + 2,
+          Math.random() * 3 + 1,
           0,
           2 * Math.PI
         )
-        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.1})`
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.8 + 0.2})`
         ctx.fill()
       }
+    },
 
-      // 在拼图位置绘制缺口轮廓
+    drawPuzzleHole(ctx) {
+      const x = this.puzzlePosition
+      const y = 50
+      const size = 50
+
+      ctx.save()
+      ctx.globalCompositeOperation = 'destination-out'
+
+      switch(this.currentPuzzleType) {
+        case 'square':
+          ctx.fillRect(x, y, size, size)
+          break
+        case 'circle':
+          ctx.beginPath()
+          ctx.arc(x + size/2, y + size/2, size/2, 0, 2 * Math.PI)
+          ctx.fill()
+          break
+        case 'triangle':
+          ctx.beginPath()
+          ctx.moveTo(x + size/2, y)
+          ctx.lineTo(x, y + size)
+          ctx.lineTo(x + size, y + size)
+          ctx.closePath()
+          ctx.fill()
+          break
+        case 'star':
+          this.drawStar(ctx, x + size/2, y + size/2, 5, size/2, size/4)
+          break
+        case 'heart':
+          this.drawHeart(ctx, x + size/2, y + size/2, size/2)
+          break
+        case 'diamond':
+          ctx.beginPath()
+          ctx.moveTo(x + size/2, y)
+          ctx.lineTo(x + size, y + size/2)
+          ctx.lineTo(x + size/2, y + size)
+          ctx.lineTo(x, y + size/2)
+          ctx.closePath()
+          ctx.fill()
+          break
+      }
+
+      ctx.restore()
+
+      // 绘制缺口边框
       ctx.strokeStyle = '#fff'
       ctx.lineWidth = 2
-      ctx.strokeRect(this.puzzlePosition, 50, 50, 50)
+      ctx.shadowColor = 'rgba(0,0,0,0.5)'
+      ctx.shadowBlur = 5
+      ctx.stroke()
+    },
 
-      this.bgImage = canvas.toDataURL()
+    drawStar(ctx, x, y, spikes, outerRadius, innerRadius) {
+      let rot = Math.PI / 2 * 3
+      let step = Math.PI / spikes
+
+      ctx.beginPath()
+      ctx.moveTo(x, y - outerRadius)
+
+      for (let i = 0; i < spikes; i++) {
+        let x1 = x + Math.cos(rot) * outerRadius
+        let y1 = y + Math.sin(rot) * outerRadius
+        ctx.lineTo(x1, y1)
+        rot += step
+
+        let x2 = x + Math.cos(rot) * innerRadius
+        let y2 = y + Math.sin(rot) * innerRadius
+        ctx.lineTo(x2, y2)
+        rot += step
+      }
+
+      ctx.lineTo(x, y - outerRadius)
+      ctx.closePath()
+      ctx.fill()
+    },
+
+    drawHeart(ctx, x, y, size) {
+      ctx.beginPath()
+      ctx.moveTo(x, y + size/4)
+      ctx.bezierCurveTo(x, y, x - size/2, y, x - size/2, y + size/4)
+      ctx.bezierCurveTo(x - size/2, y + size/2, x, y + size/2, x, y + size)
+      ctx.bezierCurveTo(x, y + size/2, x + size/2, y + size/2, x + size/2, y + size/4)
+      ctx.bezierCurveTo(x + size/2, y, x, y, x, y + size/4)
+      ctx.closePath()
+      ctx.fill()
+    },
+
+    getPuzzleMask() {
+      const canvas = document.createElement('canvas')
+      canvas.width = 50
+      canvas.height = 50
+      const ctx = canvas.getContext('2d')
+
+      ctx.fillStyle = '#000'
+      const size = 50
+
+      switch(this.currentPuzzleType) {
+        case 'square':
+          ctx.fillRect(0, 0, size, size)
+          break
+        case 'circle':
+          ctx.beginPath()
+          ctx.arc(size/2, size/2, size/2, 0, 2 * Math.PI)
+          ctx.fill()
+          break
+        case 'triangle':
+          ctx.beginPath()
+          ctx.moveTo(size/2, 0)
+          ctx.lineTo(0, size)
+          ctx.lineTo(size, size)
+          ctx.closePath()
+          ctx.fill()
+          break
+        case 'star':
+          this.drawStar(ctx, size/2, size/2, 5, size/2, size/4)
+          break
+        case 'heart':
+          this.drawHeart(ctx, size/2, size/2, size/2)
+          break
+        case 'diamond':
+          ctx.beginPath()
+          ctx.moveTo(size/2, 0)
+          ctx.lineTo(size, size/2)
+          ctx.lineTo(size/2, size)
+          ctx.lineTo(0, size/2)
+          ctx.closePath()
+          ctx.fill()
+          break
+      }
+
+      return canvas.toDataURL()
     },
 
     refreshCaptcha() {
