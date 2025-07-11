@@ -22,7 +22,7 @@
 
       <router-link to="/profile" class="function-card">
         <div class="card-icon">👤</div>
-        <h3>个人信息</h3>
+        <h3>添加个人信息</h3>
         <p>查看和修改个人信息</p>
       </router-link>
 
