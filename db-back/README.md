@@ -7,7 +7,10 @@ cd db-back
 npm init -y
 
 # 3安装依赖
-npm install express sqlite3 bcrypt jsonwebtoken cors
+# 3.1安装与Node.js v22兼容的sqlite3版本
+npm install sqlite3@5.1.7 --sqlite3_binary_host_mirror=https://npmmirror.com/mirrors/sqlite3 --save
+# 3.2
+npm install express  bcrypt jsonwebtoken cors
 
 # 4安装开发依赖
 npm install -D nodemon
