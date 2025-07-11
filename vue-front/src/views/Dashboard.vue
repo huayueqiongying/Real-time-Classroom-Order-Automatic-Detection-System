@@ -28,7 +28,7 @@
 
       <router-link to="/students" class="function-card">
         <div class="card-icon">👥</div>
-        <h3>查看学生名单</h3>
+        <h3>查看名单</h3>
         <p>管理班级学生信息</p>
       </router-link>
     </div>
