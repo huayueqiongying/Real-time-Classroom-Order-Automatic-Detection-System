@@ -19,7 +19,7 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: '/dashboard'
+      redirect: '/Login'
     },
     {
       path: '/home',
