@@ -1,7 +1,7 @@
 
 # 1创建后端目录
-mkdir backend
-cd backend
+mkdir db-back
+cd db-back
 
 # 2初始化项目
 npm init -y
