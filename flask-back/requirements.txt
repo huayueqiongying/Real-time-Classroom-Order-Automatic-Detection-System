@@ -1,0 +1,9 @@
+# requirements.txt - flask-back后端依赖包列表
+# 用于人脸识别与行为检测服务环境搭建
+Flask>=2.0.0
+Flask-CORS>=3.0.0
+Pillow>=8.0.0
+numpy>=1.21.0
+opencv-python>=4.5.0
+face-recognition>=1.3.0
+dlib>=19.0.0 
