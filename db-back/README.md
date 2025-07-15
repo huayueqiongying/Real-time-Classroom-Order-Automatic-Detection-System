@@ -18,6 +18,4 @@ npm install -D nodemon
 
 将  server.js 和 package.jsonbackend 文件保存到db-back目录
 # 运行后端服务器：
-npm start
-或者开发模式：
-npm run dev
+node server.js
