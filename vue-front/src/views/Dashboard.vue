@@ -22,7 +22,7 @@
 
       <router-link to="/profile" class="function-card">
         <div class="card-icon">👤</div>
-        <h3>添加个人信息</h3>
+        <h3>添加人员信息</h3>
         <p>查看和修改个人信息</p>
       </router-link>
 
@@ -30,6 +30,14 @@
         <div class="card-icon">👥</div>
         <h3>查看人员名单</h3>
         <p>管理班级学生信息</p>
+      </router-link>
+    </div>
+    <!-- 新增的危险区域检测组件 -->
+    <div class="function-grid" style="justify-content: center;">
+      <router-link to="/danger-zone" class="function-card">
+        <div class="card-icon">🚧</div>
+        <h3>危险区域检测</h3>
+        <p>监控教室危险区域活动</p >
       </router-link>
     </div>
   </div>

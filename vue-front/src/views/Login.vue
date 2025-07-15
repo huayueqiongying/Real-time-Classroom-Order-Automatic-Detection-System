@@ -4,11 +4,11 @@
     <form @submit.prevent="handleLogin">
       <div class="form-group">
         <label>用户名</label>
-        <input v-model="username" type="text" required>
+        <input v-model="username" type="text" required :disabled="isLoading">
       </div>
       <div class="form-group">
         <label>密码</label>
-        <input v-model="password" type="password" required>
+        <input v-model="password" type="password" required :disabled="isLoading">
       </div>
 
       <!-- 滑块验证码组件 -->
@@ -18,12 +18,22 @@
         @error="onCaptchaError"
       />
 
+      <!-- 错误提示 -->
+      <div v-if="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <!-- 成功提示 -->
+      <div v-if="successMessage" class="success-message">
+        {{ successMessage }}
+      </div>
+
       <button
         type="submit"
-        :disabled="!isCaptchaValid"
-        :class="{ 'disabled': !isCaptchaValid }"
+        :disabled="!isCaptchaValid || isLoading"
+        :class="{ 'disabled': !isCaptchaValid || isLoading, 'loading': isLoading }"
       >
-        登录
+        {{ isLoading ? '登录中...' : '登录' }}
       </button>
 
       <p>还没有账号？<router-link to="/register">立即注册</router-link></p>
@@ -33,6 +43,7 @@
 
 <script>
 import SliderCaptcha from '@/components/SliderCaptcha'
+import axios from 'axios'
 
 export default {
   name: 'Login',
@@ -43,7 +54,10 @@ export default {
     return {
       username: '',
       password: '',
-      isCaptchaValid: false
+      isCaptchaValid: false,
+      isLoading: false,
+      errorMessage: '',
+      successMessage: ''
     }
   },
   methods: {
@@ -57,31 +71,52 @@ export default {
       console.log('验证码验证失败')
     },
 
-    handleLogin() {
+    async handleLogin() {
       if (!this.isCaptchaValid) {
-        alert('请先完成滑块验证')
+        this.errorMessage = '请先完成滑块验证'
         return
       }
 
-      // 这里处理登录逻辑
-      console.log('登录信息:', {
-        username: this.username,
-        password: this.password
-      })
+      // 清空之前的消息
+      this.errorMessage = ''
+      this.successMessage = ''
+      this.isLoading = true
 
-      // 模拟登录成功
-      // 实际项目中这里会调用API
-      alert('登录成功！')
+      try {
+        // 调用后端API
+        const response = await axios.post('http://localhost:3000/api/login', {
+          username: this.username,
+          password: this.password
+        })
 
-      // 登录成功后可以跳转到主页
-      this.$router.push('/dashboard')
+        if (response.data.success) {
+          this.successMessage = response.data.message
 
-      // 或者更新父组件的登录状态
-      // this.$parent.isAuthenticated = true
+          // 保存用户信息和token
+          localStorage.setItem('token', response.data.token)
+          localStorage.setItem('user', JSON.stringify(response.data.user))
 
-      // 重置验证码以便下次登录
-      this.$refs.captcha.reset()
-      this.isCaptchaValid = false
+          // 更新父组件的登录状态
+          this.$parent.isAuthenticated = true
+
+          // 跳转到首页
+          setTimeout(() => {
+            this.$router.push('/dashboard')
+          }, 1000)
+        }
+      } catch (error) {
+        if (error.response && error.response.data) {
+          this.errorMessage = error.response.data.message
+        } else {
+          this.errorMessage = '登录失败，请检查网络连接'
+        }
+
+        // 重置验证码
+        this.$refs.captcha.reset()
+        this.isCaptchaValid = false
+      } finally {
+        this.isLoading = false
+      }
     }
   }
 }
@@ -113,6 +148,11 @@ input {
   border-radius: 4px;
 }
 
+input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
 button {
   width: 100%;
   padding: 10px;
@@ -134,8 +174,27 @@ button.disabled {
   cursor: not-allowed;
 }
 
-button.disabled:hover {
-  background-color: #ccc;
+button.loading {
+  background-color: #42b983;
+  opacity: 0.7;
+}
+
+.error-message {
+  background-color: #ffeaea;
+  color: #d32f2f;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #ffcdd2;
+}
+
+.success-message {
+  background-color: #e8f5e8;
+  color: #388e3c;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #c8e6c9;
 }
 
 a {

@@ -1,4 +1,5 @@
 <template>
+  <!-- 模板部分保持不变 -->
   <div class="profile-container">
     <div
       class="drop-zone"
@@ -52,21 +53,30 @@
 
         <!-- 老师专属字段 -->
         <div class="form-group" v-if="role === 'teacher'">
-          <label>工号</label>
-          <input type="text" v-model="formData.teacherId" required>
+          <label>工号 <small>(格式：T开头+数字，如T001)</small></label>
+          <input
+            type="text"
+            v-model="formData.teacherId"
+            pattern="^T\d+$"
+            required
+          >
         </div>
 
         <!-- 学生专属字段 -->
         <div class="form-group" v-if="role === 'student'">
-          <label>学号</label>
-          <input type="text" v-model="formData.studentId" required>
+          <label>学号 <small>(格式：S开头+数字，如S2023001)</small></label>
+          <input
+            type="text"
+            v-model="formData.studentId"
+            pattern="^S\d+$"
+            required
+          >
         </div>
       </div>
 
       <button
         @click="submit"
         class="submit-btn"
-        v-if="canSubmit"
         :disabled="!canSubmit"
       >
         提交信息
@@ -76,12 +86,14 @@
 </template>
 
 <script>
+import axios from 'axios';
+
 export default {
   data() {
     return {
       selectedFile: null,
       previewUrl: "",
-      role: "teacher", // 默认选择老师
+      role: "teacher", // 默认老师
       formData: {
         name: "",
         gender: "male",
@@ -93,30 +105,32 @@ export default {
   },
   computed: {
     canSubmit() {
-      // 检查是否已选择图片
       if (!this.selectedFile) return false;
-
-      // 检查公共必填字段
       if (!this.formData.name.trim() || !this.formData.phone.trim()) return false;
 
-      // 根据角色检查特定ID字段
-      if (this.role === 'teacher' && !this.formData.teacherId.trim()) return false;
-      if (this.role === 'student' && !this.formData.studentId.trim()) return false;
-
-      return true;
+      if (this.role === 'teacher') {
+        return /^T\d+$/.test(this.formData.teacherId);
+      } else {
+        return /^S\d+$/.test(this.formData.studentId);
+      }
+    },
+    currentUserId() {
+      return this.role === 'teacher'
+        ? this.formData.teacherId
+        : this.formData.studentId;
     }
   },
   methods: {
     handleDrop(e) {
       const files = e.dataTransfer.files;
-      if (files.length > 0) {
+      if (files.length > 0 && files[0].type.startsWith('image/')) {
         this.selectedFile = files[0];
         this.previewImage();
       }
     },
     handleFileSelect(e) {
       const files = e.target.files;
-      if (files.length > 0) {
+      if (files.length > 0 && files[0].type.startsWith('image/')) {
         this.selectedFile = files[0];
         this.previewImage();
       }
@@ -128,16 +142,116 @@ export default {
       }
       this.previewUrl = URL.createObjectURL(this.selectedFile);
     },
-    submit() {
-      const formData = {
-        role: this.role,
-        ...this.formData,
-        imageFile: this.selectedFile
+
+    async saveUserToDatabase() {
+      try {
+        await axios.post('http://localhost:3000/api/save-user-data', {
+          userId: this.currentUserId,
+          name: this.formData.name,
+          gender: this.formData.gender,
+          phone: this.formData.phone,
+          role: this.role
+        });
+      } catch (error) {
+        console.error('数据库保存失败:', error);
+        throw error; // 抛出错误由调用者处理
+      }
+    },
+    // 将图片转换为base64格式
+  async convertFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        // 去掉data:image/...;base64,前缀，只保留base64数据
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
       };
-      console.log('提交数据:', formData);
-      // 这里可以添加实际的提交逻辑
-      alert('信息提交成功！');
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  },
+
+  // 调用后端的人脸注册功能
+  async registerFace() {
+    if (!this.selectedFile || !this.currentUserId) {
+      throw new Error('缺少图片或用户ID');
     }
+
+    try {
+      const imageBase64 = await this.convertFileToBase64(this.selectedFile);
+
+      const response = await axios.post('http://localhost:5000/face-register', {
+        student_id: this.currentUserId, // 使用当前用户ID（老师或学生）
+        image: imageBase64
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.message === 'Face registered successfully') {
+        console.log('人脸注册成功:', response.data);
+        return response.data;
+      } else {
+        throw new Error(response.data.error || '人脸注册失败');
+      }
+    } catch (error) {
+      console.error('人脸注册失败:', error);
+      throw error;
+    }
+  },
+
+    // 修改原有的submit方法
+  async submit() {
+    if (!this.canSubmit || this.isSubmitting) return;
+
+    this.isSubmitting = true;
+
+    try {
+      // 1. 先进行人脸注册
+      await this.registerFace();
+
+      // 2. 保存用户信息到数据库 (你现有的逻辑)
+      await this.saveUserToDatabase();
+
+      alert(`提交成功！\n用户ID: ${this.currentUserId}\n人脸特征已注册到系统`);
+      this.resetForm();
+
+    } catch (error) {
+      console.error('提交失败:', error);
+      let errorMsg = '提交失败';
+
+      if (error.response && error.response.data) {
+        errorMsg = error.response.data.error || error.response.data.message || errorMsg;
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+
+      alert('错误: ' + errorMsg);
+    } finally {
+      this.isSubmitting = false;
+    }
+  },
+    resetForm() {
+      this.selectedFile = null;
+      if (this.previewUrl) {
+        URL.revokeObjectURL(this.previewUrl);
+      }
+      this.previewUrl = "";
+      this.formData = {
+        name: "",
+        gender: "male",
+        phone: "",
+        teacherId: "",
+        studentId: ""
+      };
+    }
+
+
+
+
+
+
   },
   beforeDestroy() {
     if (this.previewUrl) {
@@ -148,6 +262,7 @@ export default {
 </script>
 
 <style>
+/* 样式部分保持不变 */
 .profile-container {
   max-width: 800px;
   margin: 0 auto;
@@ -226,6 +341,11 @@ export default {
   margin-bottom: 8px;
   font-weight: 500;
   color: #333;
+}
+
+.form-group small {
+  color: #666;
+  font-size: 0.8em;
 }
 
 .form-group input,

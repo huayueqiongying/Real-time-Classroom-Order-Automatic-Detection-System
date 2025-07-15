@@ -2,9 +2,19 @@
   <div class="camera-view">
     <div class="header">
       <h2>实时摄像头</h2>
-      <div class="status-indicator">
-        <div class="status-dot" :class="statusClass"></div>
-        <span class="status-text">{{ statusText }}</span>
+      <div class="header-controls">
+        <div class="mode-selector">
+          <label>检测模式:</label>
+          <select v-model="selectedMode" @change="changeMode" class="mode-select">
+            <option value="face">人脸识别</option>
+            <option value="behavior">行为检测</option>
+            <option value="combined">综合检测</option>
+          </select>
+        </div>
+        <div class="status-indicator">
+          <div class="status-dot" :class="statusClass"></div>
+          <span class="status-text">{{ statusText }}</span>
+        </div>
       </div>
     </div>
 
@@ -24,6 +34,7 @@
           <div class="loading-content">
             <div class="loading-spinner"></div>
             <p>正在连接摄像头...</p>
+            <p class="mode-info">当前模式: {{ getModeText(selectedMode) }}</p>
           </div>
         </div>
 
@@ -52,6 +63,12 @@
           全屏
         </button>
       </div>
+
+      <!-- 模式说明 -->
+      <div class="mode-description">
+        <h4>{{ getModeText(selectedMode) }}</h4>
+        <p>{{ getModeDescription(selectedMode) }}</p>
+      </div>
     </div>
   </div>
 </template>
@@ -61,19 +78,26 @@ export default {
   name: 'CameraView',
   data() {
     return {
-      videoFeedBaseUrl: 'http://127.0.0.1:5000/video_feed',
-      streamId: '1', // 你的流ID是1
+      baseUrl: 'http://127.0.0.1:5000',
+      streamId: '1',
+      selectedMode: 'combined', // 默认使用综合模式
       isLoading: true,
       hasError: false,
       errorMessage: '',
       connectionStatus: 'connecting',
       retryCount: 0,
-      maxRetries: 3
+      maxRetries: 3,
+      modeEndpoints: {
+        face: 'video_feed',
+        behavior: 'behavior_feed',
+        combined: 'combined_feed'
+      }
     };
   },
   computed: {
     videoFeedUrl() {
-      return `${this.videoFeedBaseUrl}/${this.streamId}?t=${Date.now()}`;
+      const endpoint = this.modeEndpoints[this.selectedMode];
+      return `${this.baseUrl}/${endpoint}/${this.streamId}?t=${Date.now()}`;
     },
     statusClass() {
       return {
@@ -92,6 +116,28 @@ export default {
     }
   },
   methods: {
+    getModeText(mode) {
+      const texts = {
+        face: '人脸识别模式',
+        behavior: '行为检测模式',
+        combined: '综合检测模式'
+      };
+      return texts[mode] || '未知模式';
+    },
+
+    getModeDescription(mode) {
+      const descriptions = {
+        face: '识别已注册的用户身份，绿框表示已注册用户，红框表示陌生人',
+        behavior: '检测学习行为，如举手、阅读、睡觉等行为状态',
+        combined: '同时进行人脸识别和行为检测，只对已注册用户进行行为分析'
+      };
+      return descriptions[mode] || '未知模式';
+    },
+
+    changeMode() {
+      this.refreshStream();
+    },
+
     handleImageLoad() {
       this.isLoading = false;
       this.hasError = false;
@@ -103,7 +149,7 @@ export default {
       this.isLoading = false;
       this.hasError = true;
       this.connectionStatus = 'error';
-      this.errorMessage = '无法连接到摄像头，请检查设备状态';
+      this.errorMessage = `无法连接到摄像头 (${this.getModeText(this.selectedMode)})，请检查设备状态`;
 
       // 自动重试
       if (this.retryCount < this.maxRetries) {
@@ -190,6 +236,40 @@ export default {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-selector label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #34495e;
+}
+
+.mode-select {
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mode-select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .status-indicator {
@@ -290,9 +370,14 @@ export default {
 }
 
 .loading-content p {
-  margin: 0;
+  margin: 8px 0;
   font-size: 16px;
   font-weight: 500;
+}
+
+.mode-info {
+  font-size: 14px;
+  opacity: 0.8;
 }
 
 .error-icon {
@@ -325,6 +410,7 @@ export default {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.3s ease;
+  margin: 0 auto;
 }
 
 .retry-button:hover {
@@ -340,6 +426,7 @@ export default {
   display: flex;
   gap: 12px;
   justify-content: center;
+  margin-bottom: 16px;
 }
 
 .control-btn {
@@ -368,6 +455,27 @@ export default {
   font-size: 16px;
 }
 
+.mode-description {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.mode-description h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.mode-description p {
+  margin: 0;
+  font-size: 14px;
+  color: #7f8c8d;
+  line-height: 1.4;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .camera-view {
@@ -376,8 +484,15 @@ export default {
 
   .header {
     flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .header-controls {
+    flex-direction: column;
     gap: 12px;
     align-items: flex-start;
+    width: 100%;
   }
 
   .header h2 {
