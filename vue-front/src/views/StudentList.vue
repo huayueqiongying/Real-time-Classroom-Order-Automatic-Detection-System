@@ -35,7 +35,6 @@
             <td>{{ formatDate(user.created_at) }}</td>
             <td>
               <button @click="confirmDelete(user)" class="delete-button">删除</button>
-              <button @click="editUser(user)" class="edit-button">修改</button>
             </td>
           </tr>
         </tbody>
@@ -100,21 +99,6 @@ export default {
       return date.toLocaleString();
     },
 
-    editUser(user) {
-      console.log('尝试编辑用户:', user); // 调试用
-      this.$router.push({
-        path: '/edit-profile',
-        query: {
-          id: user.user_id,
-          role: user.role
-        }
-      }).catch(err => {
-        console.error('导航错误:', err);
-      });
-    },
-
-
-
     async confirmDelete(user) {
       if (confirm(`确定要删除 ${user.name} (${user.user_id}) 吗？`)) {
         await this.deleteUser(user.id);
@@ -176,7 +160,7 @@ export default {
   font-size: 14px;
 }
 
-/* 添加删除按钮样式 */
+/* 删除按钮样式 */
 .delete-button {
   padding: 6px 12px;
   background-color: #f56c6c;
@@ -190,24 +174,6 @@ export default {
 .delete-button:hover {
   background-color: #e74c3c;
 }
-
-/* 添加编辑按钮样式 */
-.edit-button {
-  padding: 6px 12px;
-  background-color: #67c23a;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  margin-left: 8px;
-}
-
-.edit-button:hover {
-  background-color: #85ce61;
-}
-
-
 
 .search-button:hover {
   background-color: #66b1ff;
