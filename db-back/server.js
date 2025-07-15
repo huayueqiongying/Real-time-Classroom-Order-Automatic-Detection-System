@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const path = require('path');
+const userRoutes = require('./userRoutes');
 
 const app = express();
 const PORT = 3000;
@@ -218,6 +219,10 @@ app.get('/api/users', (req, res) => {
   });
 });
 
+// 在server.js的底部添加（确保在app.listen之前）
+const userDataRoutes = require('./userDataRoutes');
+app.use('/api/user-data', userDataRoutes); // 所有师生信息查询走这个路由
+
 // 启动服务器
 app.listen(PORT, () => {
   console.log(`服务器运行在 http://localhost:${PORT}`);
@@ -235,3 +240,15 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+// 在文件顶部新增引入
+const fileUploadRouter = require('./file-upload');
+
+// 在 app.use(express.json()); 后添加静态文件服务
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+
+// 在现有路由后添加文件上传路由
+app.use('/api', fileUploadRouter); // 现在上传接口是 /api/upload
+
+app.use('/api/user-data', userRoutes);
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+
