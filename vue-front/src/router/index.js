@@ -9,6 +9,7 @@ import CameraView from '@/views/CameraView'
 import EventHandling from '@/views/EventHandling'
 import Profile from '@/views/Profile'
 import StudentList from '@/views/StudentList'
+import DangerZone from '@/views/DangerZone'
 //import AdminAuth from '@/views/AdminAuth'
 //import AdminDashboard from '@/views/AdminDashboard'
 //import WhiteList from '@/views/WhiteList'
@@ -19,7 +20,7 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: '/Login'
+      redirect: '/login'
     },
     {
       path: '/home',
@@ -66,13 +67,13 @@ export default new Router({
       path: '/students',
       name: 'StudentList',
       component: StudentList
-    }
+    },
     // 管理员相关路由
-    //{
-    //  path: '/admin-auth',
-    //  name: 'AdminAuth',
-    //  component: AdminAuth
-    //},
+    {
+      path: '/danger-zone',
+      name: 'DangerZone',
+      component: DangerZone
+    },
     //{
     //  path: '/admin',
     //  name: 'AdminDashboard',
