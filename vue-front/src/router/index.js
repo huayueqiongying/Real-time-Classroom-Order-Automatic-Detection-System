@@ -20,7 +20,7 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: '/login'
+      redirect: '/Login'
     },
     {
       path: '/home',
@@ -68,12 +68,26 @@ export default new Router({
       name: 'StudentList',
       component: StudentList
     },
-    // 管理员相关路由
+    {
+      path: '/edit-profile',
+      name: 'EditProfile',
+      component: () => import('@/views/EditProfile.vue'),
+      props: (route) => ({
+        id: route.query.id,
+        role: route.query.role
+      })
+    },
     {
       path: '/danger-zone',
       name: 'DangerZone',
       component: DangerZone
     },
+    // 管理员相关路由
+    //{
+    //  path: '/admin-auth',
+    //  name: 'AdminAuth',
+    //  component: AdminAuth
+    //},
     //{
     //  path: '/admin',
     //  name: 'AdminDashboard',
