@@ -259,7 +259,8 @@ export default {
           params: {
             page: this.currentPage,
             per_page: this.perPage,
-            status: this.selectedStatus
+            status: this.selectedStatus,
+            event_type: this.selectedEventType
           }
         })
 
