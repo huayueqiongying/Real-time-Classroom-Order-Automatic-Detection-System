@@ -1,0 +1,1 @@
+Could not fetch URL https://pypi.org/simple/onnxruntime-gpu/: There was a problem confirming the ssl certificate: HTTPSConnectionPool(host='pypi.org', port=443): Max retries exceeded with url: /simple/onnxruntime-gpu/ (Caused by SSLError(SSLError(1, '[SSL: KRB5_S_TKT_NYV] unexpected eof while reading (_ssl.c:1091)'))) - skipping
