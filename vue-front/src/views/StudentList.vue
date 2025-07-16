@@ -86,6 +86,7 @@ export default {
       } catch (err) {
         console.error('获取用户数据出错:', err);
         this.error = err.message;
+        alert('获取用户数据失败: ' + err.message);
       } finally {
         this.loading = false;
       }
@@ -100,25 +101,36 @@ export default {
     },
 
     async confirmDelete(user) {
-      if (confirm(`确定要删除 ${user.name} (${user.user_id}) 吗？`)) {
-        await this.deleteUser(user.id);
-      }
-    },
-    async deleteUser(userId) {
-      try {
-        const response = await fetch(`http://localhost:3000/api/user-data/users/${userId}`, {
-          method: 'DELETE'
-        });
+      if (confirm(`确定要删除 ${user.name} (ID: ${user.user_id}) 吗？\n这将同时删除用户信息和人脸特征。`)) {
+        try {
+          // 先删除人脸特征
+          const faceResponse = await fetch(`http://localhost:5000/face-delete/${user.user_id}`, {
+            method: 'DELETE'
+          });
 
-        if (!response.ok) {
-          throw new Error('删除失败');
+          if (!faceResponse.ok) {
+            const faceError = await faceResponse.json();
+            throw new Error(faceError.error || '删除人脸特征失败');
+          }
+
+          // 然后删除用户信息
+          const userResponse = await fetch(`http://localhost:3000/api/user-data/users/${user.id}`, {
+            method: 'DELETE'
+          });
+
+          if (!userResponse.ok) {
+            const userError = await userResponse.json();
+            throw new Error(userError.error || '删除用户信息失败');
+          }
+
+          // 删除成功后刷新列表
+          this.fetchUsers();
+          alert(`用户 ${user.name} (ID: ${user.user_id}) 删除成功`);
+        } catch (err) {
+          console.error('删除过程中出错:', err);
+          this.error = err.message;
+          alert('删除失败: ' + err.message);
         }
-
-        // 删除成功后刷新列表
-        this.fetchUsers();
-      } catch (err) {
-        console.error('删除用户出错:', err);
-        this.error = err.message;
       }
     }
   },
@@ -160,7 +172,6 @@ export default {
   font-size: 14px;
 }
 
-/* 删除按钮样式 */
 .delete-button {
   padding: 6px 12px;
   background-color: #f56c6c;
@@ -217,12 +228,5 @@ export default {
 
 .error {
   color: #f56c6c;
-}
-
-.user-image {
-  width: 50px;
-  height: 50px;
-  object-fit: cover;
-  border-radius: 50%;
 }
 </style>
