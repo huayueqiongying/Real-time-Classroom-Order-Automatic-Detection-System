@@ -20,7 +20,11 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: '/Login'
+      redirect: to => {
+        // 根据登录状态重定向
+        const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true'
+        return isAuthenticated ? '/dashboard' : '/login'
+      }
     },
     {
       path: '/home',
