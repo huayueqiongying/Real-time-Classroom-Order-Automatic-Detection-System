@@ -28,9 +28,13 @@ facerec = dlib.face_recognition_model_v1('./dat/dlib_face_recognition_resnet_mod
 # 初始化YOLOv11行为检测模型
 behavior_model_path = './model/best.onnx'
 behavior_session = None
+# 行为类别统一配置
 behavior_classes = [
-    '玩手机', '弯腰', '举手', '抬头', '阅读', '睡觉', '转头', '直立'
+    '举手', '抬头', '阅读', '直立',
+    '玩手机', '睡觉', '弯腰', '转头'
 ]
+good_behaviors = {"举手", "抬头", "阅读", "直立"}
+bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
 
 
 def load_behavior_model():
@@ -854,7 +858,7 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
     current_time = time.time()
     current_active_bad = set()
     current_active_stranger = set()
