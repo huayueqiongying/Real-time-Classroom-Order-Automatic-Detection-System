@@ -585,7 +585,7 @@ def video_feed(stream_id):
     try:
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
+        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
         return Response(gen_frames(stream_url, mode='face'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -599,7 +599,7 @@ def behavior_feed(stream_id):
     try:
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
+        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
         return Response(gen_frames(stream_url, mode='behavior'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -618,7 +618,7 @@ def test_stream(stream_id):
     try:
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
+        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
         cap = cv2.VideoCapture(stream_url)
 
         if cap.isOpened():
@@ -1110,7 +1110,7 @@ def combined_feed(stream_id):
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
 
-        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
+        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
         return Response(gen_frames_with_anomaly_detection(stream_url, mode='combined'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -1624,7 +1624,7 @@ def danger_feed(stream_id):
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
 
-        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
+        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
         return Response(gen_frames_with_danger_detection(stream_url, mode='danger'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
