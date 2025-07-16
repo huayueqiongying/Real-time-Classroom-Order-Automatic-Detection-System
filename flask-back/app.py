@@ -28,13 +28,10 @@ facerec = dlib.face_recognition_model_v1('./dat/dlib_face_recognition_resnet_mod
 # 初始化YOLOv11行为检测模型
 behavior_model_path = './model/best.onnx'
 behavior_session = None
-# 行为类别统一配置
 behavior_classes = [
-    '举手', '抬头', '阅读', '直立',
-    '玩手机', '睡觉', '弯腰', '转头'
+    '玩手机', '弯腰', '书', '玩手机', '举手', '手机',
+    '抬头', '阅读', '睡觉', '转头', '直立', '玩手机'
 ]
-good_behaviors = {"举手", "抬头", "阅读", "直立"}
-bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
 
 
 def load_behavior_model():
@@ -215,7 +212,8 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立"}
-    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -223,6 +221,8 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         # 框颜色与下方卡片一致
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -266,25 +266,6 @@ def face_register():
         json.dump(registered_faces, file)
 
     return jsonify({'message': 'Face registered successfully'})
-
-# 删除人脸特征接口
-@app.route('/face-delete/<student_id>', methods=['DELETE'])
-def face_delete(student_id):
-        # 加载已注册的人脸
-        registered_faces = load_registered_faces()
-
-        # 检查该ID是否存在
-        if student_id in registered_faces:
-            # 删除对应的人脸特征
-            del registered_faces[student_id]
-
-            # 保存更新后的数据
-            with open(registered_faces_file, 'w') as file:
-                json.dump(registered_faces, file)
-
-            return {'message': 'Face deleted successfully'}
-        else:
-            return {'error': 'Face not found'}, 404
 
 
 def boxes_overlap(box1, box2):
@@ -344,7 +325,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         small_font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立", "书"}
-    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -362,6 +344,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         # 框颜色
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -622,15 +606,8 @@ cooldown_duration = 5  # 30秒冷却时间
 events_db_file = 'anomaly_events.db'
 video_buffer_size = 150  # 5秒 * 30fps = 150帧
 stream_buffers = {}  # 存储每个流的视频缓冲区
-anomaly_threshold = 0.6 
-stranger_threshold = 0.6 
-#anomaly_threshold = 0.6  # 降低异常行为置信度阈值，便于测试
-#stranger_threshold = 0.6 # 降低陌生人置信度阈值，便于测试
-
-# 添加全局变量分别管理陌生人和普通异常行为的活跃状态
-active_bad_behaviors = {}  # {(stream_id, student_id, behavior_class): bool}
-active_strangers = {}      # {(stream_id): bool}
-
+anomaly_threshold = 0.2  # 异常行为置信度阈值
+stranger_threshold = 0.2
 
 # 初始化数据库
 def init_events_db():
@@ -832,7 +809,9 @@ def save_video_clip(stream_id, frames, event_id):
 
 
 def record_anomaly_event(stream_id, event_type, behavior_class, confidence, student_id, frames):
+    """记录异常事件"""
     try:
+        print(f"[record_anomaly_event] called with: stream_id={stream_id}, event_type={event_type}, behavior_class={behavior_class}, confidence={confidence}, student_id={student_id}, frames_count={len(frames) if frames else 0}")
         event_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
 
@@ -853,41 +832,47 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
         conn.commit()
         conn.close()
 
+        print(f"记录异常事件: {event_type} - {behavior_class} - {student_id}")
+
     except Exception as e:
-        pass
+        print(f"记录异常事件失败: {e}")
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
+    print(f"[check_anomaly_conditions] called for stream_id={stream_id}, behaviors={behaviors}")
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
     current_time = time.time()
-    current_active_bad = set()
-    current_active_stranger = set()
+    current_active_keys = set()
 
     for behavior in behaviors:
+        print(f"[check_anomaly_conditions] evaluating behavior: {behavior}")
         # 检查异常行为
         if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
             student_id = behavior.get('student_id', 'Unknown')
-            key = (stream_id, student_id, behavior['class'])
-            current_active_bad.add(key)
-            if not active_bad_behaviors.get(key, False):
-                active_bad_behaviors[key] = True
+            event_key = f"{stream_id}_{student_id}_{behavior['class']}"
+            current_active_keys.add(event_key)
+
+            # 检查冷却时间
+            if (not event_active.get(event_key, False) and
+                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
+                event_active[event_key] = True
+                event_cooldown[event_key] = current_time
                 return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
-        # 检查陌生人
+
+        # 检查陌生人 - 添加去重
         if behavior.get('student_id') == 'Stranger':
             stranger_confidence = behavior.get('stranger_confidence', 1.0)
             if stranger_confidence > stranger_threshold:
-                key = stream_id
-                current_active_stranger.add(key)
-                if not active_strangers.get(key, False):
-                    active_strangers[key] = True
+                event_key = f"{stream_id}_Stranger"
+                current_active_keys.add(event_key)
+
+                # 检查冷却时间
+                if (not event_active.get(event_key, False) and
+                        (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
+                    event_active[event_key] = True
+                    event_cooldown[event_key] = current_time
                     return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
-    # 标记消失的异常行为为非活跃
-    for key in list(active_bad_behaviors.keys()):
-        if key not in current_active_bad:
-            active_bad_behaviors[key] = False
-    for key in list(active_strangers.keys()):
-        if key not in current_active_stranger:
-            active_strangers[key] = False
+
     return False, None, None, None, None
 
 
@@ -1031,23 +1016,16 @@ def get_anomaly_events():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         status = request.args.get('status', 'all')
-        event_type = request.args.get('event_type', 'all')
 
         conn = sqlite3.connect(events_db_file)
         cursor = conn.cursor()
 
         # 构建查询条件
-        where_clauses = []
+        where_clause = ""
         params = []
         if status != 'all':
-            where_clauses.append("status = ?")
+            where_clause = "WHERE status = ?"
             params.append(status)
-        if event_type != 'all':
-            where_clauses.append("event_type = ?")
-            params.append(event_type)
-        where_clause = ""
-        if where_clauses:
-            where_clause = "WHERE " + " AND ".join(where_clauses)
 
         # 获取总数
         cursor.execute(f"SELECT COUNT(*) FROM anomaly_events {where_clause}", params)
