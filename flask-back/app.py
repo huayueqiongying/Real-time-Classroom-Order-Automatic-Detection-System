@@ -953,7 +953,6 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
 
     cap.release()
 
-
 # 新增API端点
 @app.route('/anomaly_events', methods=['GET'])
 def get_anomaly_events():
