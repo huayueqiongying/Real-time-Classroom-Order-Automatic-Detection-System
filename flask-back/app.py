@@ -29,8 +29,7 @@ facerec = dlib.face_recognition_model_v1('./dat/dlib_face_recognition_resnet_mod
 behavior_model_path = './model/best.onnx'
 behavior_session = None
 behavior_classes = [
-    '玩手机', '弯腰', '书', '玩手机', '举手', '手机',
-    '抬头', '阅读', '睡觉', '转头', '直立', '玩手机'
+    '玩手机', '弯腰', '举手', '抬头', '阅读', '睡觉', '转头', '直立'
 ]
 
 
@@ -212,8 +211,7 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立"}
-    neutral_behaviors = {"弯腰", "转头"}
-    bad_behaviors = {"玩手机", "睡觉"}
+    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -221,8 +219,6 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         # 框颜色与下方卡片一致
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        elif det['class'] in neutral_behaviors:
-            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -325,8 +321,7 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         small_font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立", "书"}
-    neutral_behaviors = {"弯腰", "转头"}
-    bad_behaviors = {"玩手机", "睡觉", "手机"}
+    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -344,8 +339,6 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         # 框颜色
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        elif det['class'] in neutral_behaviors:
-            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -606,8 +599,15 @@ cooldown_duration = 5  # 30秒冷却时间
 events_db_file = 'anomaly_events.db'
 video_buffer_size = 150  # 5秒 * 30fps = 150帧
 stream_buffers = {}  # 存储每个流的视频缓冲区
-anomaly_threshold = 0.6  # 异常行为置信度阈值
-stranger_threshold = 0.6
+anomaly_threshold = 0.6 
+stranger_threshold = 0.6 
+#anomaly_threshold = 0.6  # 降低异常行为置信度阈值，便于测试
+#stranger_threshold = 0.6 # 降低陌生人置信度阈值，便于测试
+
+# 添加全局变量分别管理陌生人和普通异常行为的活跃状态
+active_bad_behaviors = {}  # {(stream_id, student_id, behavior_class): bool}
+active_strangers = {}      # {(stream_id): bool}
+
 
 # 初始化数据库
 def init_events_db():
@@ -809,7 +809,6 @@ def save_video_clip(stream_id, frames, event_id):
 
 
 def record_anomaly_event(stream_id, event_type, behavior_class, confidence, student_id, frames):
-    """记录异常事件"""
     try:
         event_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
@@ -831,53 +830,41 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
         conn.commit()
         conn.close()
 
-        print(f"记录异常事件: {event_type} - {behavior_class} - {student_id}")
-
     except Exception as e:
-        print(f"记录异常事件失败: {e}")
+        pass
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    """检查是否存在异常行为，添加去重机制"""
-    bad_behaviors = {"玩手机", "睡觉", "手机"}
+    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
     current_time = time.time()
-    current_active_keys = set()
+    current_active_bad = set()
+    current_active_stranger = set()
 
     for behavior in behaviors:
         # 检查异常行为
         if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
             student_id = behavior.get('student_id', 'Unknown')
-            event_key = f"{stream_id}_{student_id}_{behavior['class']}"
-            current_active_keys.add(event_key)
-
-            # 检查冷却时间
-            if (not event_active.get(event_key, False) and
-                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
-                event_active[event_key] = True
-                event_cooldown[event_key] = current_time
+            key = (stream_id, student_id, behavior['class'])
+            current_active_bad.add(key)
+            if not active_bad_behaviors.get(key, False):
+                active_bad_behaviors[key] = True
                 return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
-
-        # 检查陌生人 - 添加去重
+        # 检查陌生人
         if behavior.get('student_id') == 'Stranger':
-            # 获取陌生人置信度，如果没有则默认为1.0
             stranger_confidence = behavior.get('stranger_confidence', 1.0)
-
-            # 只有置信度大于阈值的陌生人才会被记录
             if stranger_confidence > stranger_threshold:
-                event_key = f"{stream_id}_Stranger"
-                current_active_keys.add(event_key)
-
-            # 检查冷却时间
-            if (not event_active.get(event_key, False) and
-                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
-                event_active[event_key] = True
-                event_cooldown[event_key] = current_time
-                return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
-    #标记已消失的异常行为为非活跃
-    for key in list(event_active.keys()):
-        if key not in current_active_keys:
-            event_active[key] = False
-
+                key = stream_id
+                current_active_stranger.add(key)
+                if not active_strangers.get(key, False):
+                    active_strangers[key] = True
+                    return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
+    # 标记消失的异常行为为非活跃
+    for key in list(active_bad_behaviors.keys()):
+        if key not in current_active_bad:
+            active_bad_behaviors[key] = False
+    for key in list(active_strangers.keys()):
+        if key not in current_active_stranger:
+            active_strangers[key] = False
     return False, None, None, None, None
 
 
@@ -1021,16 +1008,23 @@ def get_anomaly_events():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         status = request.args.get('status', 'all')
+        event_type = request.args.get('event_type', 'all')
 
         conn = sqlite3.connect(events_db_file)
         cursor = conn.cursor()
 
         # 构建查询条件
-        where_clause = ""
+        where_clauses = []
         params = []
         if status != 'all':
-            where_clause = "WHERE status = ?"
+            where_clauses.append("status = ?")
             params.append(status)
+        if event_type != 'all':
+            where_clauses.append("event_type = ?")
+            params.append(event_type)
+        where_clause = ""
+        if where_clauses:
+            where_clause = "WHERE " + " AND ".join(where_clauses)
 
         # 获取总数
         cursor.execute(f"SELECT COUNT(*) FROM anomaly_events {where_clause}", params)
