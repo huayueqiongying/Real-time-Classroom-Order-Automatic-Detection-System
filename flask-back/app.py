@@ -439,8 +439,7 @@ def gen_frames(stream_url, mode='face'):
                 face_results = []
                 registered_face_areas = []
                 enhanced_behaviors = []
-
-                stranger_detected = False  # 标记本帧是否已记录陌生人
+                stranger_present = False
 
                 if mode == 'face' or mode == 'combined':
                     # 人脸识别
@@ -468,12 +467,7 @@ def gen_frames(stream_url, mode='face'):
                                     'bbox': face_bbox
                                 })
                         else:
-                            # 检测到陌生人，直接写入异常（每帧只写一次）
-                            if not stranger_detected:
-                                buffer_frames = list(stream_buffers[stream_id])
-                                threading.Thread(target=record_anomaly_event,
-                                                 args=(stream_id, 'stranger', 'stranger', 1.0, 'Stranger', buffer_frames)).start()
-                                stranger_detected = True
+                            stranger_present = True
                         face_results.append({
                             'bbox': [face.left(), face.top(), face.right(), face.bottom()],
                             'name': name,
@@ -516,6 +510,17 @@ def gen_frames(stream_url, mode='face'):
                     enhanced_behaviors = behaviors
 
                 # 检查异常条件（所有模式都检测）
+                stranger_event_key = f"{stream_id}_Stranger"
+                if stranger_present:
+                    if not event_active.get(stranger_event_key, False):
+                        event_active[stranger_event_key] = True
+                        buffer_frames = list(stream_buffers[stream_id])
+                        threading.Thread(target=record_anomaly_event,
+                                         args=(stream_id, 'stranger', 'stranger', 1.0, 'Stranger', buffer_frames)).start()
+                else:
+                    if event_active.get(stranger_event_key, False):
+                        event_active[stranger_event_key] = False
+
                 is_anomaly, event_type, behavior_class, confidence, student_id = check_anomaly_conditions(
                     enhanced_behaviors, stream_id)
                 if is_anomaly:
