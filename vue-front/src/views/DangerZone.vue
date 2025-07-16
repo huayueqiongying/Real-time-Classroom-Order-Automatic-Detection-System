@@ -215,12 +215,12 @@
               <span class="alerts-count">共 {{ alerts.length }} 条告警</span>
               <button @click="clearAlerts" class="clear-btn">清除告警</button>
             </div>
-            <div class="alerts-list" style="max-height: 300px; min-height: 150px;">
+            <div class="alerts-list">
               <div v-if="alerts.length === 0" class="empty-message">
                 暂无告警信息
               </div>
               <div
-                v-for="alert in alerts.slice(0, 10)"
+                v-for="alert in alerts"
                 :key="alert.timestamp"
                 class="alert-item"
                 :class="{ 'alert-high': alert.severity === 'high' }"
@@ -268,7 +268,7 @@ export default {
   data() {
     return {
       baseUrl: 'http://127.0.0.1:5000',
-      streamId: '1',
+      streamId: '78',
       isLoading: true,
       hasError: false,
       errorMessage: '',
@@ -873,6 +873,7 @@ export default {
   background: #e9ecef;
 }
 
+/* 修改控制面板的布局 */
 .control-panel {
   display: flex;
   flex-direction: column;
@@ -880,7 +881,22 @@ export default {
   height: 100%;
   overflow: hidden;
 }
+/* 新增以下规则 */
+.control-panel .panel-section:nth-child(1),
+.control-panel .panel-section:nth-child(2) {
+  flex: 0 0 auto;    /* 前两个区域（配置和列表）自动高度 */
+  max-height: 200px; /* 限制最大高度 */
+  overflow-y: auto;  /* 内容过多时滚动 */
+}
 
+/* 告警信息区域 */
+.panel-section:nth-child(3) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px; /* 设置最小高度 */
+  /* 移除 max-height，改用固定高度 */
+}
 .panel-section {
   background: white;
   border-radius: 12px;
@@ -998,16 +1014,19 @@ export default {
 }
 
 .alerts-container {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  height: 100%;
+  overflow: hidden; /* 防止外部容器滚动 */
+  height: 100%; /* 添加高度100% */
 }
 
 .alerts-header {
+  flex-shrink: 0; /* 防止头部被压缩 */
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 12px;
 }
 
 .alerts-count {
@@ -1036,9 +1055,13 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-right: 4px;
+  height: 100%; /* 确保高度填满容器 */
+  max-height: 500px; /* 或者直接设置固定高度 */
 }
 
 .alert-item {
+  flex-shrink: 0; /* 防止告警项被压缩 */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1091,6 +1114,24 @@ export default {
 
 .alert-severity.high {
   background: #e74c3c;
+}
+/* 滚动条样式 */
+.alerts-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.alerts-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.alerts-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.alerts-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 .empty-message {
