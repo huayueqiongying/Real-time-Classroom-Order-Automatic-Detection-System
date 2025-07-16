@@ -68,15 +68,16 @@ export default new Router({
       name: 'StudentList',
       component: StudentList
     },
-    {
-      path: '/edit-profile',
-      name: 'EditProfile',
-      component: () => import('@/views/EditProfile.vue'),
-      props: (route) => ({
-        id: route.query.id,
-        role: route.query.role
-      })
-    },
+    // 注释掉EditProfile路由，防止找不到文件导致编译报错
+    // {
+    //   path: '/edit-profile',
+    //   name: 'EditProfile',
+    //   component: () => import('@/views/EditProfile.vue'),
+    //   props: (route) => ({
+    //     id: route.query.id,
+    //     role: route.query.role
+    //   })
+    // },
     {
       path: '/danger-zone',
       name: 'DangerZone',

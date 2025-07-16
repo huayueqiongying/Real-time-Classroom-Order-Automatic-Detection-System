@@ -20,6 +20,25 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
+# 在文件顶部全局初始化event_active
+import threading
+import time
+from datetime import datetime
+import uuid
+from collections import deque
+import sqlite3
+
+# 在全局添加活跃标志字典
+stranger_active = {}
+behavior_active = {}
+stranger_disappear_count = {}
+behavior_disappear_count = {}
+disappear_buffer = 5  # 允许5帧短暂丢失
+
+# 在全局添加消失帧数控制字典和阈值
+event_last_disappear_frame = {}
+disappear_frame_threshold = 30  # 30帧，约2秒（可根据实际帧率调整）
+
 # 初始化dlib模型
 detector = dlib.get_frontal_face_detector()
 sp = dlib.shape_predictor('./dat/shape_predictor_68_face_landmarks.dat')
@@ -212,8 +231,7 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立"}
-    neutral_behaviors = {"弯腰", "转头"}
-    bad_behaviors = {"玩手机", "睡觉"}
+    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -221,8 +239,6 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         # 框颜色与下方卡片一致
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        elif det['class'] in neutral_behaviors:
-            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -346,8 +362,7 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         small_font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立", "书"}
-    neutral_behaviors = {"弯腰", "转头"}
-    bad_behaviors = {"玩手机", "睡觉", "手机"}
+    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -365,8 +380,6 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         # 框颜色
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        elif det['class'] in neutral_behaviors:
-            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -411,17 +424,14 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
 
 
 def gen_frames(stream_url, mode='face'):
-    """
-    生成视频帧
-    mode: 'face' - 人脸识别模式, 'behavior' - 行为检测模式, 'combined' - 综合模式
-    """
-    print(f"正在连接视频流: {stream_url} (模式: {mode})")
+    global event_last_disappear_frame
+    print(f"[DEBUG] gen_frames called, mode={mode}, stream_url={stream_url}", flush=True)
     cap = cv2.VideoCapture(stream_url)
-
-    # 检查视频流是否成功打开
+    stream_id = stream_url.split('/')[-1]
+    if stream_id not in stream_buffers:
+        stream_buffers[stream_id] = deque(maxlen=video_buffer_size)
     if not cap.isOpened():
-        print(f"无法打开视频流: {stream_url}")
-        # 返回错误图像
+        print(f"[DEBUG] cap not opened for stream_url={stream_url}", flush=True)
         error_frame = np.zeros((480, 480, 3), dtype=np.uint8)
         cv2.putText(error_frame, "无法连接视频流", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         ret, buffer = cv2.imencode('.jpg', error_frame)
@@ -429,71 +439,140 @@ def gen_frames(stream_url, mode='face'):
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + error_frame_bytes + b'\r\n')
         return
-
-    print(f"视频流连接成功: {stream_url}")
-
-    # 设置分辨率为320*320
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 320)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 添加这行，减少缓冲区
-    cap.set(cv2.CAP_PROP_FPS, 15)  # 添加这行，限制帧率
-    frame_skip = 3  # 跳过的帧数，约5fps
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    cap.set(cv2.CAP_PROP_FPS, 15)
+    frame_skip = 3
     frame_count = 0
-
     while True:
         success, frame = cap.read()
         if not success:
-            print(f"读取视频帧失败，尝试重新连接...")
-            # 尝试重新连接
+            print(f"[DEBUG] cap.read() failed, try reconnect", flush=True)
             cap.release()
             cap = cv2.VideoCapture(stream_url)
             if not cap.isOpened():
-                print(f"重新连接失败")
+                print(f"[DEBUG] cap reopen failed", flush=True)
                 break
             continue
-
+        stream_buffers[stream_id].append(frame.copy())
         if frame_count % frame_skip == 0:
             try:
-                if mode == 'face':
-                    # 人脸识别模式
+                current_time = time.time()
+                print(f"[DEBUG] frame_count: {frame_count}", flush=True)
+                behaviors = []
+                face_results = []
+                registered_face_areas = []
+                enhanced_behaviors = []
+                stranger_present = False
+                if mode == 'face' or mode == 'combined':
+                    print(f"[DEBUG] face/combined mode, start face detection", flush=True)
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     faces = detector(gray, 1)
-
+                    print(f"[DEBUG] faces detected: {len(faces)}", flush=True)
                     for face in faces:
                         shape = sp(frame, face)
                         face_encoding = np.array(facerec.compute_face_descriptor(frame, shape))
-                        matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding,
-                                                                 tolerance=0.4)
-
+                        matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding, tolerance=0.4)
+                        face_distances = face_recognition.face_distance(list(registered_faces.values()), face_encoding)
                         name = "Stranger"
-                        color = (0, 0, 255)  # 默认红色标记陌生人
-
+                        color = (0, 0, 255)
+                        is_registered = False
                         if True in matches:
-                            first_match_index = matches.index(True)
-                            student_id = list(registered_faces.keys())[first_match_index]
-                            name = student_id
-                            color = (0, 255, 0)  # 绿色标记已注册人脸
-
+                            best_match_index = np.argmin(face_distances)
+                            if matches[best_match_index]:
+                                student_id = list(registered_faces.keys())[best_match_index]
+                                name = student_id
+                                color = (0, 255, 0)
+                                is_registered = True
+                                face_bbox = [face.left(), face.top(), face.right(), face.bottom()]
+                                registered_face_areas.append({
+                                    'student_id': student_id,
+                                    'bbox': face_bbox
+                                })
+                        else:
+                            stranger_present = True
+                        print(f"[DEBUG] face detected: name={name}, is_registered={is_registered}", flush=True)
+                        face_results.append({
+                            'bbox': [face.left(), face.top(), face.right(), face.bottom()],
+                            'name': name,
+                            'color': color,
+                            'is_registered': is_registered
+                        })
                         cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), color, 2)
-                        cv2.putText(frame, name, (face.left(), face.top() - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color,
-                                    2)
-
-                elif mode == 'behavior':
-                    # 行为检测模式
+                        cv2.putText(frame, name, (face.left(), face.top() - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                if mode == 'behavior' or mode == 'combined':
+                    print(f"[DEBUG] behavior/combined mode, start behavior detection", flush=True)
                     behaviors = detect_behaviors(frame)
+                    print(f"[DEBUG] behaviors detected: {behaviors}", flush=True)
                     font_path = os.path.join(os.path.dirname(__file__), "SimHei.ttf")
                     frame = draw_chinese_boxes(frame, behaviors, font_path)
-                # 编码图像
+                if (mode == 'behavior' or mode == 'combined') and len(face_results) > 0:
+                    for behavior in behaviors:
+                        behavior_bbox = behavior['bbox']
+                        behavior_copy = behavior.copy()
+                        associated_user = None
+                        max_overlap = 0
+                        for face_area in registered_face_areas:
+                            overlap_ratio = calculate_overlap_ratio(behavior_bbox, face_area['bbox'])
+                            if overlap_ratio > max_overlap and overlap_ratio > 0.1:
+                                max_overlap = overlap_ratio
+                                associated_user = face_area['student_id']
+                        if not associated_user:
+                            for face_result in face_results:
+                                if not face_result['is_registered']:
+                                    overlap_ratio = calculate_overlap_ratio(behavior_bbox, face_result['bbox'])
+                                    if overlap_ratio > 0.1:
+                                        associated_user = "Stranger"
+                                        break
+                        if associated_user:
+                            behavior_copy['student_id'] = associated_user
+                            behavior_copy['is_registered'] = associated_user != "Stranger"
+                        enhanced_behaviors.append(behavior_copy)
+                else:
+                    enhanced_behaviors = behaviors
+                stranger_event_key = f"{stream_id}_Stranger"
+                print(f"[DEBUG] stranger_present: {stranger_present}", flush=True)
+                # --- 陌生人消失-再出现频率控制（活跃标志法） ---
+                if stranger_present:
+                    stranger_disappear_count[stranger_event_key] = 0
+                    if not stranger_active.get(stranger_event_key, False):
+                        buffer_frames = list(stream_buffers[stream_id])
+                        print(f"[DEBUG] Stranger detected, writing anomaly event for stream_id={stream_id}", flush=True)
+                        threading.Thread(target=record_anomaly_event,
+                                         args=(stream_id, 'stranger', 'stranger', 1.0, 'Stranger', buffer_frames)).start()
+                        stranger_active[stranger_event_key] = True
+                else:
+                    stranger_disappear_count[stranger_event_key] = stranger_disappear_count.get(stranger_event_key, 0) + 1
+                    if stranger_disappear_count[stranger_event_key] >= disappear_buffer:
+                        if stranger_active.get(stranger_event_key, False):
+                            stranger_active[stranger_event_key] = False
+                # --- 行为异常消失-再出现频率控制（活跃标志法） ---
+                is_anomaly, event_type, behavior_class, confidence, student_id, behavior_event_key = check_anomaly_conditions(
+                    enhanced_behaviors, stream_id)
+                print(f"[DEBUG] check_anomaly_conditions result: is_anomaly={is_anomaly}, event_type={event_type}, behavior_class={behavior_class}, confidence={confidence}, student_id={student_id}, event_key={behavior_event_key}", flush=True)
+                if is_anomaly and behavior_event_key:
+                    behavior_disappear_count[behavior_event_key] = 0
+                    if not behavior_active.get(behavior_event_key, False):
+                        buffer_frames = list(stream_buffers[stream_id])
+                        print(f"[DEBUG] Other anomaly detected, writing anomaly event for stream_id={stream_id}", flush=True)
+                        threading.Thread(target=record_anomaly_event,
+                                         args=(stream_id, event_type, behavior_class, confidence, student_id,
+                                               buffer_frames)).start()
+                        behavior_active[behavior_event_key] = True
+                elif behavior_event_key:
+                    behavior_disappear_count[behavior_event_key] = behavior_disappear_count.get(behavior_event_key, 0) + 1
+                    if behavior_disappear_count[behavior_event_key] >= disappear_buffer:
+                        if behavior_active.get(behavior_event_key, False):
+                            behavior_active[behavior_event_key] = False
                 ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 40 ,int(cv2.IMWRITE_JPEG_OPTIMIZE), 1  ])
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             except Exception as e:
-                print(f"处理视频帧时出错: {e}")
+                print(f"[ERROR] Exception in gen_frames: {e}", flush=True)
                 continue
-
         frame_count += 1
-
     cap.release()
 
 
@@ -504,11 +583,9 @@ def gen_frames(stream_url, mode='face'):
 @app.route('/video_feed/<stream_id>')
 def video_feed(stream_id):
     try:
-        # 确保stream_id是数字
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-
-        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
+        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
         return Response(gen_frames(stream_url, mode='face'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -520,11 +597,9 @@ def video_feed(stream_id):
 def behavior_feed(stream_id):
     """行为检测视频流"""
     try:
-        # 确保stream_id是数字
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-
-        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
+        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
         return Response(gen_frames(stream_url, mode='behavior'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -541,11 +616,9 @@ def health_check():
 def test_stream(stream_id):
     """测试视频流连接"""
     try:
-        # 确保stream_id是数字
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
-
-        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
+        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
         cap = cv2.VideoCapture(stream_url)
 
         if cap.isOpened():
@@ -698,7 +771,7 @@ def save_video_clip(stream_id, frames, event_id):
 
 
 def record_anomaly_event(stream_id, event_type, behavior_class, confidence, student_id, frames):
-    """记录异常事件"""
+    print(f"[DEBUG] record_anomaly_event called: stream_id={stream_id}, event_type={event_type}, behavior_class={behavior_class}, confidence={confidence}, student_id={student_id}", flush=True)
     try:
         event_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
@@ -720,38 +793,24 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
         conn.commit()
         conn.close()
 
-        print(f"记录异常事件: {event_type} - {behavior_class} - {student_id}")
+        print(f"[DEBUG] Anomaly event recorded: {event_type} - {behavior_class} - {student_id}", flush=True)
 
     except Exception as e:
-        print(f"记录异常事件失败: {e}")
+        print(f"[ERROR] Failed to record anomaly event: {e}", flush=True)
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    """检查是否存在异常行为，添加去重机制"""
-    bad_behaviors = {"玩手机", "睡觉", "手机"}
-    current_time = time.time()
-
+    """检查是否存在异常行为，返回唯一事件key"""
+    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
     for behavior in behaviors:
-        # 检查异常行为
         if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
             student_id = behavior.get('student_id', 'Unknown')
-            event_key = f"{stream_id}_{student_id}_{behavior['class']}"
-
-            # 检查冷却时间
-            if event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration:
-                event_cooldown[event_key] = current_time
-                return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
-
-        # 检查陌生人 - 添加去重
-        if behavior.get('student_id') == 'Stranger':
-            event_key = f"{stream_id}_Stranger"
-
-            # 检查冷却时间
-            if event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration:
-                event_cooldown[event_key] = current_time
-                return True, 'stranger', behavior['class'], behavior['confidence'], 'Stranger'
-
-    return False, None, None, None, None
+            event_type = 'bad_behavior'
+            behavior_class = behavior['class']
+            # 生成与gen_frames一致的唯一key
+            event_key = f"{stream_id}_{event_type}_{behavior_class}_{student_id}"
+            return True, event_type, behavior_class, behavior['confidence'], student_id, event_key
+    return False, None, None, None, None, None
 
 
 # 修改gen_frames函数，在combined模式中添加异常检测
@@ -805,6 +864,7 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
 
         if frame_count % frame_skip == 0:
             try:
+                current_time = time.time()
                 if mode == 'combined':
                     # 综合模式：同时进行人脸识别和行为检测
                     behaviors = detect_behaviors(frame)
@@ -815,18 +875,15 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
 
                     registered_face_areas = []
                     face_results = []
-
+                    stranger_present = False
                     for face in faces:
                         shape = sp(frame, face)
                         face_encoding = np.array(facerec.compute_face_descriptor(frame, shape))
-                        matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding,
-                                                                 tolerance=0.4)
+                        matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding, tolerance=0.4)
                         face_distances = face_recognition.face_distance(list(registered_faces.values()), face_encoding)
-
                         name = "Stranger"
                         color = (0, 0, 255)
                         is_registered = False
-
                         if True in matches:
                             best_match_index = np.argmin(face_distances)
                             if matches[best_match_index]:
@@ -834,19 +891,27 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
                                 name = student_id
                                 color = (0, 255, 0)
                                 is_registered = True
-
                                 face_bbox = [face.left(), face.top(), face.right(), face.bottom()]
                                 registered_face_areas.append({
                                     'student_id': student_id,
                                     'bbox': face_bbox
                                 })
-
+                        else:
+                            stranger_present = True
                         face_results.append({
                             'bbox': [face.left(), face.top(), face.right(), face.bottom()],
                             'name': name,
                             'color': color,
                             'is_registered': is_registered
                         })
+                    # --- 新增陌生人写入逻辑 ---
+                    stranger_event_key = f"{stream_id}_Stranger"
+                    if stranger_present:
+                        if not event_cooldown.get(stranger_event_key, False) or (current_time - event_cooldown[stranger_event_key]) > cooldown_duration:
+                            event_cooldown[stranger_event_key] = current_time
+                            buffer_frames = list(stream_buffers[stream_id])
+                            threading.Thread(target=record_anomaly_event,
+                                             args=(stream_id, 'stranger', 'stranger', 1.0, 'Stranger', buffer_frames)).start()
 
                     # 为行为检测结果关联用户信息
                     enhanced_behaviors = []
@@ -878,10 +943,10 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
                         enhanced_behaviors.append(behavior_copy)
 
                     # 检查异常条件
-                    is_anomaly, event_type, behavior_class, confidence, student_id = check_anomaly_conditions(
+                    is_anomaly, event_type, behavior_class, confidence, student_id, behavior_event_key = check_anomaly_conditions(
                         enhanced_behaviors, stream_id)
 
-                    if is_anomaly:
+                    if is_anomaly and behavior_event_key:
                         # 获取当前缓冲区的所有帧
                         buffer_frames = list(stream_buffers[stream_id])
                         # 在后台线程中记录异常事件
@@ -927,16 +992,23 @@ def get_anomaly_events():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         status = request.args.get('status', 'all')
+        event_type = request.args.get('event_type', 'all')
 
         conn = sqlite3.connect(events_db_file)
         cursor = conn.cursor()
 
         # 构建查询条件
-        where_clause = ""
+        where_clauses = []
         params = []
         if status != 'all':
-            where_clause = "WHERE status = ?"
+            where_clauses.append('status = ?')
             params.append(status)
+        if event_type != 'all':
+            where_clauses.append('event_type = ?')
+            params.append(event_type)
+        where_clause = ''
+        if where_clauses:
+            where_clause = 'WHERE ' + ' AND '.join(where_clauses)
 
         # 获取总数
         cursor.execute(f"SELECT COUNT(*) FROM anomaly_events {where_clause}", params)
@@ -1038,7 +1110,7 @@ def combined_feed(stream_id):
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
 
-        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
+        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
         return Response(gen_frames_with_anomaly_detection(stream_url, mode='combined'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
@@ -1467,6 +1539,7 @@ def gen_frames_with_danger_detection(stream_url, mode='face'):
 
         if frame_count % frame_skip == 0:
             try:
+                current_time = time.time()
                 if mode == 'danger':
                     # 危险区域检测模式
                     behaviors = detect_behaviors(frame)
@@ -1551,7 +1624,7 @@ def danger_feed(stream_id):
         if not stream_id.isdigit():
             return jsonify({'error': 'Invalid stream ID, must be a number'}), 400
 
-        stream_url = f'rtmp://116.205.102.242:9090/live/{stream_id}'
+        stream_url = f'rtmp://124.70.28.44:9090/live/{stream_id}'
         return Response(gen_frames_with_danger_detection(stream_url, mode='danger'),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
