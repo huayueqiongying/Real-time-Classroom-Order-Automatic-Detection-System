@@ -263,6 +263,25 @@ def face_register():
 
     return jsonify({'message': 'Face registered successfully'})
 
+# 删除人脸特征接口
+@app.route('/face-delete/<student_id>', methods=['DELETE'])
+def face_delete(student_id):
+        # 加载已注册的人脸
+        registered_faces = load_registered_faces()
+
+        # 检查该ID是否存在
+        if student_id in registered_faces:
+            # 删除对应的人脸特征
+            del registered_faces[student_id]
+
+            # 保存更新后的数据
+            with open(registered_faces_file, 'w') as file:
+                json.dump(registered_faces, file)
+
+            return {'message': 'Face deleted successfully'}
+        else:
+            return {'error': 'Face not found'}, 404
+
 
 def boxes_overlap(box1, box2):
     """检查两个矩形框是否重叠"""
