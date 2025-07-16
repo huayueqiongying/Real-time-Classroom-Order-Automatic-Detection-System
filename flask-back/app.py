@@ -146,6 +146,8 @@ def detect_behaviors(frame):
                     'confidence': float(score),
                     'bbox': [xmin, ymin, xmax, ymax]
                 })
+        # 移除所有调试输出
+        # print("本帧检测到行为数：", len(detections), detections)
         return detections
     except Exception as e:
         print(f"行为检测出错: {e}")
@@ -203,13 +205,15 @@ def draw_chinese_boxes(frame, behaviors, font_path):
     draw = ImageDraw.Draw(image)
     try:
         font = ImageFont.truetype(font_path, 20)
+        # 移除所有调试输出
+        # print("字体加载成功", font_path)
     except Exception as e:
         print("字体加载失败：", e)
         font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立"}
-    # neutral_behaviors 已归为异常行为
-    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -217,8 +221,8 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         # 框颜色与下方卡片一致
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        # elif det['class'] in neutral_behaviors:
-        #     color = (255, 200, 0)  # 黄色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -262,6 +266,27 @@ def face_register():
         json.dump(registered_faces, file)
 
     return jsonify({'message': 'Face registered successfully'})
+
+#删除人脸特征
+@app.route('/face-delete/<student_id>', methods=['DELETE'])
+def face_delete(student_id):
+    # 加载已注册的人脸
+    registered_faces = load_registered_faces()
+
+    # 检查该ID是否存在
+    if student_id in registered_faces:
+        # 删除对应的人脸特征
+        del registered_faces[student_id]
+
+        # 保存更新后的数据
+        with open(registered_faces_file, 'w') as file:
+            json.dump(registered_faces, file)
+
+        return jsonify({'message': 'Face deleted successfully'})
+    else:
+        return jsonify({'error': 'Face not found'}), 404
+
+
 
 
 def boxes_overlap(box1, box2):
@@ -321,7 +346,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         small_font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立", "书"}
-    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -339,8 +365,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         # 框颜色
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
-        # elif det['class'] in neutral_behaviors:
-        #     color = (255, 200, 0)  # 黄色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -389,14 +415,8 @@ def gen_frames(stream_url, mode='face'):
     生成视频帧
     mode: 'face' - 人脸识别模式, 'behavior' - 行为检测模式, 'combined' - 综合模式
     """
+    print(f"正在连接视频流: {stream_url} (模式: {mode})")
     cap = cv2.VideoCapture(stream_url)
-
-    # 从URL中提取stream_id
-    stream_id = stream_url.split('/')[-1]
-
-    # 初始化该流的缓冲区
-    if stream_id not in stream_buffers:
-        stream_buffers[stream_id] = deque(maxlen=video_buffer_size)
 
     # 检查视频流是否成功打开
     if not cap.isOpened():
@@ -409,6 +429,8 @@ def gen_frames(stream_url, mode='face'):
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + error_frame_bytes + b'\r\n')
         return
+
+    print(f"视频流连接成功: {stream_url}")
 
     # 设置分辨率为320*320
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -430,105 +452,37 @@ def gen_frames(stream_url, mode='face'):
                 break
             continue
 
-        # 将原始帧添加到缓冲区
-        stream_buffers[stream_id].append(frame.copy())
-
         if frame_count % frame_skip == 0:
             try:
-                behaviors = []
-                face_results = []
-                registered_face_areas = []
-                enhanced_behaviors = []
-                stranger_present = False
-
-                if mode == 'face' or mode == 'combined':
-                    # 人脸识别
+                if mode == 'face':
+                    # 人脸识别模式
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     faces = detector(gray, 1)
+
                     for face in faces:
                         shape = sp(frame, face)
                         face_encoding = np.array(facerec.compute_face_descriptor(frame, shape))
                         matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding,
                                                                  tolerance=0.4)
-                        face_distances = face_recognition.face_distance(list(registered_faces.values()), face_encoding)
-                        name = "Stranger"
-                        color = (0, 0, 255)
-                        is_registered = False
-                        if True in matches:
-                            best_match_index = np.argmin(face_distances)
-                            if matches[best_match_index]:
-                                student_id = list(registered_faces.keys())[best_match_index]
-                                name = student_id
-                                color = (0, 255, 0)
-                                is_registered = True
-                                face_bbox = [face.left(), face.top(), face.right(), face.bottom()]
-                                registered_face_areas.append({
-                                    'student_id': student_id,
-                                    'bbox': face_bbox
-                                })
-                        else:
-                            stranger_present = True
-                        face_results.append({
-                            'bbox': [face.left(), face.top(), face.right(), face.bottom()],
-                            'name': name,
-                            'color': color,
-                            'is_registered': is_registered
-                        })
-                        cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), color, 2)
-                        cv2.putText(frame, name, (face.left(), face.top() - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-                if mode == 'behavior' or mode == 'combined':
-                    # 行为检测
+                        name = "Stranger"
+                        color = (0, 0, 255)  # 默认红色标记陌生人
+
+                        if True in matches:
+                            first_match_index = matches.index(True)
+                            student_id = list(registered_faces.keys())[first_match_index]
+                            name = student_id
+                            color = (0, 255, 0)  # 绿色标记已注册人脸
+
+                        cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), color, 2)
+                        cv2.putText(frame, name, (face.left(), face.top() - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color,
+                                    2)
+
+                elif mode == 'behavior':
+                    # 行为检测模式
                     behaviors = detect_behaviors(frame)
                     font_path = os.path.join(os.path.dirname(__file__), "SimHei.ttf")
                     frame = draw_chinese_boxes(frame, behaviors, font_path)
-
-                # 关联行为与人脸，增强行为信息
-                if (mode == 'behavior' or mode == 'combined') and len(face_results) > 0:
-                    for behavior in behaviors:
-                        behavior_bbox = behavior['bbox']
-                        behavior_copy = behavior.copy()
-                        associated_user = None
-                        max_overlap = 0
-                        for face_area in registered_face_areas:
-                            overlap_ratio = calculate_overlap_ratio(behavior_bbox, face_area['bbox'])
-                            if overlap_ratio > max_overlap and overlap_ratio > 0.1:
-                                max_overlap = overlap_ratio
-                                associated_user = face_area['student_id']
-                        if not associated_user:
-                            for face_result in face_results:
-                                if not face_result['is_registered']:
-                                    overlap_ratio = calculate_overlap_ratio(behavior_bbox, face_result['bbox'])
-                                    if overlap_ratio > 0.1:
-                                        associated_user = "Stranger"
-                                        break
-                        if associated_user:
-                            behavior_copy['student_id'] = associated_user
-                            behavior_copy['is_registered'] = associated_user != "Stranger"
-                        enhanced_behaviors.append(behavior_copy)
-                else:
-                    enhanced_behaviors = behaviors
-
-                # 检查异常条件（所有模式都检测）
-                stranger_event_key = f"{stream_id}_Stranger"
-                if stranger_present:
-                    if not event_active.get(stranger_event_key, False):
-                        event_active[stranger_event_key] = True
-                        buffer_frames = list(stream_buffers[stream_id])
-                        threading.Thread(target=record_anomaly_event,
-                                         args=(stream_id, 'stranger', 'stranger', 1.0, 'Stranger', buffer_frames)).start()
-                else:
-                    if event_active.get(stranger_event_key, False):
-                        event_active[stranger_event_key] = False
-
-                is_anomaly, event_type, behavior_class, confidence, student_id = check_anomaly_conditions(
-                    enhanced_behaviors, stream_id)
-                if is_anomaly:
-                    buffer_frames = list(stream_buffers[stream_id])
-                    threading.Thread(target=record_anomaly_event,
-                                     args=(stream_id, event_type, behavior_class, confidence, student_id,
-                                           buffer_frames)).start()
-
                 # 编码图像
                 ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 40 ,int(cv2.IMWRITE_JPEG_OPTIMIZE), 1  ])
                 frame = buffer.tobytes()
@@ -537,7 +491,9 @@ def gen_frames(stream_url, mode='face'):
             except Exception as e:
                 print(f"处理视频帧时出错: {e}")
                 continue
+
         frame_count += 1
+
     cap.release()
 
 
@@ -660,7 +616,8 @@ from collections import deque
 import sqlite3
 
 # 添加异常事件相关的全局变量
-event_active = {}  # 用于记录当前活跃的异常事件
+event_cooldown = {}  # 用于记录事件冷却时间
+cooldown_duration = 5  # 30秒冷却时间
 events_db_file = 'anomaly_events.db'
 video_buffer_size = 150  # 5秒 * 30fps = 150帧
 stream_buffers = {}  # 存储每个流的视频缓冲区
@@ -741,6 +698,7 @@ def save_video_clip(stream_id, frames, event_id):
 
 
 def record_anomaly_event(stream_id, event_type, behavior_class, confidence, student_id, frames):
+    """记录异常事件"""
     try:
         event_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
@@ -762,31 +720,37 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
         conn.commit()
         conn.close()
 
+        print(f"记录异常事件: {event_type} - {behavior_class} - {student_id}")
+
     except Exception as e:
         print(f"记录异常事件失败: {e}")
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
-    current_active_keys = set()
+    """检查是否存在异常行为，添加去重机制"""
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
+    current_time = time.time()
+
     for behavior in behaviors:
+        # 检查异常行为
         if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
             student_id = behavior.get('student_id', 'Unknown')
             event_key = f"{stream_id}_{student_id}_{behavior['class']}"
-            current_active_keys.add(event_key)
-            if not event_active.get(event_key, False):
-                event_active[event_key] = True
+
+            # 检查冷却时间
+            if event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration:
+                event_cooldown[event_key] = current_time
                 return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
+
+        # 检查陌生人 - 添加去重
         if behavior.get('student_id') == 'Stranger':
             event_key = f"{stream_id}_Stranger"
-            current_active_keys.add(event_key)
-            if not event_active.get(event_key, False):
-                event_active[event_key] = True
+
+            # 检查冷却时间
+            if event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration:
+                event_cooldown[event_key] = current_time
                 return True, 'stranger', behavior['class'], behavior['confidence'], 'Stranger'
-    # 标记已消失的异常行为为非活跃
-    for key in list(event_active.keys()):
-        if key not in current_active_keys:
-            event_active[key] = False
+
     return False, None, None, None, None
 
 
@@ -795,6 +759,7 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
     """
     生成视频帧并检测异常事件
     """
+    print(f"正在连接视频流: {stream_url} (模式: {mode})")
     cap = cv2.VideoCapture(stream_url)
 
     # 从URL中提取stream_id
@@ -815,7 +780,8 @@ def gen_frames_with_anomaly_detection(stream_url, mode='face'):
                b'Content-Type: image/jpeg\r\n\r\n' + error_frame_bytes + b'\r\n')
         return
 
-    # 设置分辨率为640*480
+    print(f"视频流连接成功: {stream_url}")
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 添加这行，减少缓冲区
@@ -961,23 +927,16 @@ def get_anomaly_events():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         status = request.args.get('status', 'all')
-        event_type = request.args.get('event_type', 'all')
 
         conn = sqlite3.connect(events_db_file)
         cursor = conn.cursor()
 
         # 构建查询条件
-        where_clauses = []
+        where_clause = ""
         params = []
         if status != 'all':
-            where_clauses.append('status = ?')
+            where_clause = "WHERE status = ?"
             params.append(status)
-        if event_type != 'all':
-            where_clauses.append('event_type = ?')
-            params.append(event_type)
-        where_clause = ''
-        if where_clauses:
-            where_clause = 'WHERE ' + ' AND '.join(where_clauses)
 
         # 获取总数
         cursor.execute(f"SELECT COUNT(*) FROM anomaly_events {where_clause}", params)
@@ -1204,16 +1163,23 @@ def get_person_center(bbox):
 
 def check_danger_zone_violations(stream_id, behaviors):
     """检查危险区域违规 - 增强版"""
+    print(f"开始检查危险区域违规，stream_id: {stream_id}")
+    print(f"检测到的行为数量: {len(behaviors)}")
+
     if stream_id not in danger_zones:
+        print(f"未找到stream_id {stream_id}的危险区域配置")
         return []
 
     zone_config = danger_zones[stream_id]
     if not zone_config.get('enabled', False):
+        print(f"stream_id {stream_id}的危险区域检测未启用")
         return []
 
     zones = zone_config.get('zones', [])
+    print(f"配置的危险区域数量: {len(zones)}")
 
     if not zones:
+        print("没有配置任何危险区域")
         return []
 
     # 修改为 → 添加类型转换确保是浮点数
@@ -1226,27 +1192,35 @@ def check_danger_zone_violations(stream_id, behaviors):
     # 扩展检测范围 - 不仅仅检测特定行为
     for behavior in behaviors:
         behavior_class = behavior.get('class', '未知')
+        print(f"检测到行为: {behavior_class}")
 
         # 检测所有检测到的人员，不限制特定行为类别
         if behavior.get('bbox'):
             person_center = get_person_center(behavior['bbox'])
             person_id = behavior.get('student_id', f"person_{int(person_center[0])}_{int(person_center[1])}")
 
+            print(f"检测到人员: {person_id}, 位置: {person_center}")
+
             for zone_idx, zone in enumerate(zones):
                 zone_name = zone.get('name', f'危险区域{zone_idx + 1}')
                 polygon = zone.get('polygon', [])
 
                 if not polygon:
+                    print(f"区域 {zone_name} 没有多边形数据")
                     continue
+
+                print(f"检查区域: {zone_name}, 多边形点数: {len(polygon)}")
 
                 # 计算距离
                 distance = point_to_polygon_distance(person_center, polygon)
+                print(f"人员到区域距离: {distance}")
 
                 # 检查是否违规
                 is_inside = distance == 0
                 is_too_close = distance < safety_distance
 
                 if is_inside or is_too_close:
+                    print(f"检测到违规: 是否在内部={is_inside}, 是否过近={is_too_close}")
 
                     # 更新人员跟踪信息
                     if person_id not in person_tracking[stream_id]:
@@ -1279,6 +1253,8 @@ def check_danger_zone_violations(stream_id, behaviors):
                         should_alert = True
                         alert_type = "proximity"
 
+                    print(f"是否应该告警: {should_alert}, 类型: {alert_type}, 持续时间: {violation_duration}")
+
                     # 检查告警冷却
                     if should_alert and (current_time - violation_info['last_alert_time']) > ALERT_COOLDOWN_TIME:
                         violation_info['last_alert_time'] = current_time
@@ -1298,29 +1274,38 @@ def check_danger_zone_violations(stream_id, behaviors):
                         }
 
                         violations.append(violation_data)
+                        print(f"生成告警: {violation_data}")
 
+    print(f"最终违规数量: {len(violations)}")
     return violations
 
 
 # 修改绘制函数，添加调试信息
 def draw_danger_zones(frame, stream_id):
     """在视频帧上绘制危险区域 - 增强版"""
+    print(f"绘制危险区域，stream_id: {stream_id}")
 
     if stream_id not in danger_zones:
+        print(f"未找到危险区域配置: {stream_id}")
         return frame
 
     zone_config = danger_zones[stream_id]
     if not zone_config.get('enabled', False):
+        print(f"危险区域检测未启用: {stream_id}")
         return frame
 
     zones = zone_config.get('zones', [])
+    print(f"绘制区域数量: {len(zones)}")
 
     for zone_idx, zone in enumerate(zones):
         polygon = zone.get('polygon', [])
         zone_name = zone.get('name', f'危险区域{zone_idx + 1}')
 
         if len(polygon) < 3:
+            print(f"区域 {zone_name} 点数不足: {len(polygon)}")
             continue
+
+        print(f"绘制区域: {zone_name}, 点数: {len(polygon)}")
 
         # 转换为numpy数组
         points = np.array(polygon, np.int32)
@@ -1407,8 +1392,11 @@ def toggle_danger_zone(stream_id):
 def get_danger_alerts(stream_id):
     """获取指定摄像头的危险告警"""
     try:
+        print(f"收到告警查询请求，stream_id: {stream_id}")
+        print(f"当前告警总数: {len(danger_alerts)}")
         # 过滤该摄像头的告警
         stream_alerts = [alert for alert in danger_alerts if alert['stream_id'] == stream_id]
+        print(f"该摄像头的告警数: {len(stream_alerts)}")
         return jsonify({
             'alerts': stream_alerts[-50:],  # 返回最近50条告警
             'total': len(stream_alerts)
@@ -1433,6 +1421,7 @@ def gen_frames_with_danger_detection(stream_url, mode='face'):
     """
     生成视频帧并检测危险区域违规
     """
+    print(f"正在连接视频流: {stream_url} (模式: {mode})")
     cap = cv2.VideoCapture(stream_url)
 
     # 从URL中提取stream_id
@@ -1453,7 +1442,8 @@ def gen_frames_with_danger_detection(stream_url, mode='face'):
                b'Content-Type: image/jpeg\r\n\r\n' + error_frame_bytes + b'\r\n')
         return
 
-    # 设置分辨率为640*480
+    print(f"视频流连接成功: {stream_url}")
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -1522,6 +1512,7 @@ def gen_frames_with_danger_detection(stream_url, mode='face'):
                     # 如果有违规，添加到告警列表
                     if violations:
                         danger_alerts.extend(violations)
+                        print(f"检测到危险区域违规: {len(violations)}条")
 
                     # 绘制危险区域
                     frame = draw_danger_zones(frame, stream_id)
