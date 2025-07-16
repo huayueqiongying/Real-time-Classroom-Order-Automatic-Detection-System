@@ -878,7 +878,8 @@ export default {
   flex-direction: column;
   gap: 20px;
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto; /* 修改为auto以显示滚动条 */
+  max-height: 100%; /* 保证不会超出父容器 */
 }
 
 .panel-section {
