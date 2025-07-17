@@ -1,0 +1,565 @@
+{
+  "swagger": "2.0",
+  "basePath": "/",
+  "paths": {
+    "/anomaly/events": {
+      "get": {
+        "responses": {
+          "500": {
+            "description": "获取异常事件失败"
+          },
+          "200": {
+            "description": "获取异常事件成功"
+          }
+        },
+        "summary": "获取异常事件列表",
+        "operationId": "get_anomaly_events",
+        "parameters": [
+          {
+            "in": "query",
+            "description": "状态筛选",
+            "name": "status",
+            "type": "string"
+          },
+          {
+            "type": "integer",
+            "in": "query",
+            "description": "每页数量",
+            "name": "per_page"
+          },
+          {
+            "type": "integer",
+            "in": "query",
+            "description": "页码",
+            "name": "page"
+          }
+        ],
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
+    "/anomaly/events/{event_id}/handle": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "事件ID",
+          "name": "event_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "post": {
+        "responses": {
+          "500": {
+            "description": "处理事件失败"
+          },
+          "200": {
+            "description": "事件处理成功"
+          }
+        },
+        "summary": "处理异常事件",
+        "operationId": "handle_anomaly_event",
+        "parameters": [
+          {
+            "name": "payload",
+            "required": true,
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/HandleEvent"
+            }
+          }
+        ],
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
+    "/anomaly/events/{event_id}/video": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "事件ID",
+          "name": "event_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "获取视频失败"
+          },
+          "404": {
+            "description": "视频文件不存在"
+          },
+          "200": {
+            "description": "获取视频成功"
+          }
+        },
+        "summary": "获取异常事件视频",
+        "operationId": "get_anomaly_video",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
+    "/behavior/classes": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "获取行为类别成功"
+          }
+        },
+        "summary": "获取支持的行为类别",
+        "operationId": "get_behavior_classes",
+        "tags": [
+          "behavior"
+        ]
+      }
+    },
+    "/behavior/detect": {
+      "post": {
+        "responses": {
+          "500": {
+            "description": "行为检测失败"
+          },
+          "200": {
+            "description": "行为检测成功"
+          }
+        },
+        "summary": "单张图片行为检测",
+        "operationId": "detect_behavior",
+        "parameters": [
+          {
+            "name": "payload",
+            "required": true,
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/BehaviorDetection"
+            }
+          }
+        ],
+        "tags": [
+          "behavior"
+        ]
+      }
+    },
+    "/danger/alerts/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "获取告警失败"
+          },
+          "200": {
+            "description": "获取告警成功"
+          }
+        },
+        "summary": "获取指定摄像头的危险告警",
+        "operationId": "get_danger_alerts",
+        "tags": [
+          "danger"
+        ]
+      }
+    },
+    "/danger/alerts/{stream_id}/clear": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "post": {
+        "responses": {
+          "500": {
+            "description": "清除告警失败"
+          },
+          "200": {
+            "description": "告警已清除"
+          }
+        },
+        "summary": "清除指定摄像头的告警",
+        "operationId": "clear_danger_alerts",
+        "tags": [
+          "danger"
+        ]
+      }
+    },
+    "/danger/feed/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "视频流处理失败"
+          },
+          "400": {
+            "description": "无效的视频流ID"
+          },
+          "200": {
+            "description": "危险区域检测视频流获取成功"
+          }
+        },
+        "summary": "危险区域检测视频流",
+        "operationId": "get_danger_feed",
+        "tags": [
+          "danger"
+        ]
+      }
+    },
+    "/danger/zones/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "200": {
+            "description": "获取危险区域配置成功"
+          }
+        },
+        "summary": "获取指定摄像头的危险区域配置",
+        "operationId": "get_danger_zones",
+        "tags": [
+          "danger"
+        ]
+      }
+    },
+    "/danger/zones/{stream_id}/toggle": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "post": {
+        "responses": {
+          "500": {
+            "description": "操作失败"
+          },
+          "200": {
+            "description": "操作成功"
+          }
+        },
+        "summary": "启用/禁用指定摄像头的危险区域检测",
+        "operationId": "toggle_danger_zone",
+        "parameters": [
+          {
+            "name": "payload",
+            "required": true,
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/ToggleConfig"
+            }
+          }
+        ],
+        "tags": [
+          "danger"
+        ]
+      }
+    },
+    "/face/delete/{student_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "学生ID",
+          "name": "student_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "delete": {
+        "responses": {
+          "404": {
+            "description": "人脸未找到"
+          },
+          "200": {
+            "description": "人脸删除成功"
+          }
+        },
+        "operationId": "delete_face",
+        "tags": [
+          "face"
+        ]
+      }
+    },
+    "/face/register": {
+      "post": {
+        "responses": {
+          "400": {
+            "description": "未检测到人脸或多个人脸"
+          },
+          "200": {
+            "description": "人脸注册成功"
+          }
+        },
+        "operationId": "register_face",
+        "parameters": [
+          {
+            "name": "payload",
+            "required": true,
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/FaceRegister"
+            }
+          }
+        ],
+        "tags": [
+          "face"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "服务运行正常"
+          }
+        },
+        "operationId": "health_check",
+        "tags": [
+          "default"
+        ]
+      }
+    },
+    "/video/behavior_feed/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "视频流处理失败"
+          },
+          "400": {
+            "description": "无效的视频流ID"
+          },
+          "200": {
+            "description": "行为检测视频流获取成功"
+          }
+        },
+        "summary": "行为检测视频流",
+        "operationId": "get_behavior_feed",
+        "tags": [
+          "video"
+        ]
+      }
+    },
+    "/video/combined_feed/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "视频流处理失败"
+          },
+          "400": {
+            "description": "无效的视频流ID"
+          },
+          "200": {
+            "description": "综合检测视频流获取成功"
+          }
+        },
+        "summary": "综合检测视频流 - 同时进行人脸识别和行为检测",
+        "operationId": "get_combined_feed",
+        "tags": [
+          "video"
+        ]
+      }
+    },
+    "/video/feed/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "视频流处理失败"
+          },
+          "400": {
+            "description": "无效的视频流ID"
+          },
+          "200": {
+            "description": "视频流获取成功"
+          }
+        },
+        "operationId": "get_video_feed",
+        "tags": [
+          "video"
+        ]
+      }
+    },
+    "/video/test/{stream_id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "description": "视频流ID",
+          "name": "stream_id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "get": {
+        "responses": {
+          "500": {
+            "description": "视频流测试失败"
+          },
+          "400": {
+            "description": "无效的视频流ID"
+          },
+          "200": {
+            "description": "视频流测试成功"
+          }
+        },
+        "summary": "测试视频流连接",
+        "operationId": "test_stream",
+        "tags": [
+          "video"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "智能教室监控系统API",
+    "version": "1.0",
+    "description": "智能教室监控系统接口文档"
+  },
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "tags": [
+    {
+      "name": "default",
+      "description": "Default namespace"
+    },
+    {
+      "name": "face",
+      "description": "人脸识别相关操作"
+    },
+    {
+      "name": "behavior",
+      "description": "行为检测相关操作"
+    },
+    {
+      "name": "video",
+      "description": "视频流相关操作"
+    },
+    {
+      "name": "danger",
+      "description": "危险区域检测相关操作"
+    },
+    {
+      "name": "anomaly",
+      "description": "异常事件相关操作"
+    }
+  ],
+  "definitions": {
+    "FaceRegister": {
+      "required": [
+        "image",
+        "student_id"
+      ],
+      "properties": {
+        "student_id": {
+          "type": "string",
+          "description": "学生ID"
+        },
+        "image": {
+          "type": "string",
+          "description": "Base64编码的人脸图像"
+        }
+      },
+      "type": "object"
+    },
+    "BehaviorDetection": {
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Base64编码的图像"
+        }
+      },
+      "type": "object"
+    },
+    "ToggleConfig": {
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "是否启用"
+        }
+      },
+      "type": "object"
+    },
+    "HandleEvent": {
+      "properties": {
+        "handler": {
+          "type": "string",
+          "description": "处理人"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "ParseError": {
+      "description": "When a mask can't be parsed"
+    },
+    "MaskError": {
+      "description": "When any error occurs on mask"
+    }
+  }
+}
