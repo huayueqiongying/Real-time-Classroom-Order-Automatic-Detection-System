@@ -134,7 +134,7 @@
               刷新
             </button>
             <button @click="toggleFullscreen" class="control-btn">
-              <span class="btn-icon">⛶</span>
+              <span class="btn-icon">🔍</span>
               全屏
             </button>
           </div>
@@ -867,6 +867,7 @@ export default {
   cursor: pointer;
   font-size: 14px;
   transition: all 0.3s ease;
+  color: #333;
 }
 
 .control-btn:hover {
