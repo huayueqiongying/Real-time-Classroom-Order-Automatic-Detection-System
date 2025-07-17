@@ -10,6 +10,7 @@ import EventHandling from '@/views/EventHandling'
 import Profile from '@/views/Profile'
 import StudentList from '@/views/StudentList'
 import DangerZone from '@/views/DangerZone'
+import AiDailyReport from "../views/AiDailyReport.vue";
 //import AdminAuth from '@/views/AdminAuth'
 //import AdminDashboard from '@/views/AdminDashboard'
 //import WhiteList from '@/views/WhiteList'
@@ -20,11 +21,7 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: to => {
-        // 根据登录状态重定向
-        const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true'
-        return isAuthenticated ? '/dashboard' : '/login'
-      }
+      redirect: '/login'
     },
     {
       path: '/home',
@@ -72,32 +69,17 @@ export default new Router({
       name: 'StudentList',
       component: StudentList
     },
-    // 注释掉EditProfile路由，防止找不到文件导致编译报错
-    // {
-    //   path: '/edit-profile',
-    //   name: 'EditProfile',
-    //   component: () => import('@/views/EditProfile.vue'),
-    //   props: (route) => ({
-    //     id: route.query.id,
-    //     role: route.query.role
-    //   })
-    // },
+    // 危险区域
     {
       path: '/danger-zone',
       name: 'DangerZone',
       component: DangerZone
     },
-    // 管理员相关路由
-    //{
-    //  path: '/admin-auth',
-    //  name: 'AdminAuth',
-    //  component: AdminAuth
-    //},
-    //{
-    //  path: '/admin',
-    //  name: 'AdminDashboard',
-    //  component: AdminDashboard
-    //},
+    {
+      path: '/ai-daily-report',
+      name: 'AiDailyReport',
+      component: AiDailyReport
+    },
     //{
     //  path: '/whitelist',
     //  name: 'WhiteList',
