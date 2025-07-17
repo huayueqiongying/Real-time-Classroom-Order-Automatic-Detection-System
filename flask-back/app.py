@@ -1,4 +1,3 @@
-import json
 import os
 from flask import Flask, request, jsonify, Response, send_file
 import base64
@@ -8,7 +7,8 @@ import cv2
 import face_recognition
 import dlib
 from flask_cors import CORS
-
+from scipy.spatial import distance as dist
+import json
 try:
     import onnxruntime as ort
 
@@ -153,6 +153,203 @@ def detect_behaviors(frame):
         print(f"行为检测出错: {e}")
         return []
 
+
+# 在你的代码中添加以下函数
+
+def eye_aspect_ratio(eye):
+    """计算眼睛纵横比(EAR)"""
+    # 计算垂直眼睛标志点之间的欧几里得距离
+    A = dist.euclidean(eye[1], eye[5])
+    B = dist.euclidean(eye[2], eye[4])
+    # 计算水平眼睛标志点之间的欧几里得距离
+    C = dist.euclidean(eye[0], eye[3])
+    # 计算眼睛纵横比
+    ear = (A + B) / (2.0 * C)
+    return ear
+
+
+def mouth_aspect_ratio(mouth):
+    """计算嘴巴纵横比(MAR)"""
+    # 计算垂直嘴巴标志点之间的欧几里得距离
+    A = dist.euclidean(mouth[2], mouth[10])  # 51, 59
+    B = dist.euclidean(mouth[4], mouth[8])  # 53, 57
+    # 计算水平嘴巴标志点之间的欧几里得距离
+    C = dist.euclidean(mouth[0], mouth[6])  # 49, 55
+    # 计算嘴巴纵横比
+    mar = (A + B) / (2.0 * C)
+    return mar
+
+
+def get_head_pose(shape, frame_shape):
+    """计算头部姿态角度"""
+    # 3D模型点
+    model_points = np.array([
+        (0.0, 0.0, 0.0),  # 鼻尖
+        (0.0, -330.0, -65.0),  # 下巴
+        (-225.0, 170.0, -135.0),  # 左眼左角
+        (225.0, 170.0, -135.0),  # 右眼右角
+        (-150.0, -150.0, -125.0),  # 左嘴角
+        (150.0, -150.0, -125.0)  # 右嘴角
+    ])
+
+    # 2D图像点
+    image_points = np.array([
+        (shape[30][0], shape[30][1]),  # 鼻尖
+        (shape[8][0], shape[8][1]),  # 下巴
+        (shape[36][0], shape[36][1]),  # 左眼左角
+        (shape[45][0], shape[45][1]),  # 右眼右角
+        (shape[48][0], shape[48][1]),  # 左嘴角
+        (shape[54][0], shape[54][1])  # 右嘴角
+    ], dtype="double")
+
+    # 相机内参
+    height, width = frame_shape[:2]
+    focal_length = width
+    center = (width / 2, height / 2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype="double")
+
+    dist_coeffs = np.zeros((4, 1))
+
+    # 求解PnP问题
+    success, rotation_vector, translation_vector = cv2.solvePnP(
+        model_points, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+
+    # 将旋转向量转换为旋转矩阵
+    rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
+
+    # 计算欧拉角
+    sy = np.sqrt(rotation_matrix[0, 0] * rotation_matrix[0, 0] + rotation_matrix[1, 0] * rotation_matrix[1, 0])
+    singular = sy < 1e-6
+
+    if not singular:
+        x = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
+        y = np.arctan2(-rotation_matrix[2, 0], sy)
+        z = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+    else:
+        x = np.arctan2(-rotation_matrix[1, 2], rotation_matrix[1, 1])
+        y = np.arctan2(-rotation_matrix[2, 0], sy)
+        z = 0
+
+    # 转换为角度
+    pitch = np.degrees(x)  # 俯仰角（点头）
+    yaw = np.degrees(y)  # 偏航角（摇头）
+    roll = np.degrees(z)  # 翻滚角（歪头）
+
+    return pitch, yaw, roll
+
+
+# 全局变量用于连续帧检测
+sleep_frame_counters = {}  # 记录每个人的睡觉帧计数
+SLEEP_CONSECUTIVE_FRAMES = 5  # 需要连续检测的帧数
+
+
+def is_sleeping_pose(face_landmarks, frame_shape, person_id="default"):
+    """平衡的睡觉姿势检测 - 主要依赖眼睛闭合，辅以其他特征"""
+    global sleep_frame_counters
+
+    # 定义眼睛和嘴巴的关键点索引
+    LEFT_EYE_POINTS = list(range(36, 42))
+    RIGHT_EYE_POINTS = list(range(42, 48))
+    MOUTH_POINTS = list(range(48, 68))
+
+    # 提取眼睛和嘴巴的关键点
+    left_eye = np.array([(face_landmarks[i][0], face_landmarks[i][1]) for i in LEFT_EYE_POINTS])
+    right_eye = np.array([(face_landmarks[i][0], face_landmarks[i][1]) for i in RIGHT_EYE_POINTS])
+    mouth = np.array([(face_landmarks[i][0], face_landmarks[i][1]) for i in MOUTH_POINTS])
+
+    # 计算眼睛纵横比
+    left_ear = eye_aspect_ratio(left_eye)
+    right_ear = eye_aspect_ratio(right_eye)
+    ear = (left_ear + right_ear) / 2.0
+
+    # 计算嘴巴纵横比
+    mar = mouth_aspect_ratio(mouth)
+
+    # 计算头部姿态
+    pitch, yaw, roll = get_head_pose(face_landmarks, frame_shape)
+
+    # 平衡的阈值设置
+    EAR_THRESHOLD = 0.22  # 眼睛闭合阈值 - 适中的值
+    MAR_THRESHOLD = 0.55  # 嘴巴张开阈值 - 适中的值
+    HEAD_DOWN_THRESHOLD = 20  # 头部向下阈值 - 适中的值
+    HEAD_TILT_THRESHOLD = 28  # 头部倾斜阈值 - 适中的值
+
+    # 检测各个特征
+    sleeping_indicators = []
+
+    # 1. 眼睛闭合检测 - 核心特征
+    eyes_closed = ear < EAR_THRESHOLD
+    if eyes_closed:
+        sleeping_indicators.append("eyes_closed")
+
+    # 2. 头部向下低头检测 - 重要特征
+    head_down = pitch > HEAD_DOWN_THRESHOLD
+    if head_down:
+        sleeping_indicators.append("head_down")
+
+    # 3. 头部倾斜检测 - 辅助特征
+    head_tilted = abs(roll) > HEAD_TILT_THRESHOLD
+    if head_tilted:
+        sleeping_indicators.append("head_tilted")
+
+    # 4. 嘴巴微张检测 - 辅助特征
+    mouth_open = mar > MAR_THRESHOLD
+    if mouth_open:
+        sleeping_indicators.append("mouth_open")
+
+    # 简化的睡觉判断逻辑：
+    # 方案1：眼睛闭合就认为是睡觉（最简单直接）
+    # 方案2：眼睛闭合 + 任意一个辅助特征（更稳定）
+    # 这里使用方案1，如果误检太多可以改为方案2
+
+    current_sleep_detected = eyes_closed  # 方案1：只要眼睛闭合
+    # current_sleep_detected = eyes_closed and len(sleeping_indicators) >= 2  # 方案2：眼睛闭合+其他特征
+
+    # 连续帧检测逻辑
+    if person_id not in sleep_frame_counters:
+        sleep_frame_counters[person_id] = 0
+
+    if current_sleep_detected:
+        sleep_frame_counters[person_id] += 1
+    else:
+        sleep_frame_counters[person_id] = 0
+
+    # 需要连续检测到才确认睡觉
+    is_sleeping = sleep_frame_counters[person_id] >= SLEEP_CONSECUTIVE_FRAMES
+
+    # 计算置信度
+    if is_sleeping:
+        # 基础置信度基于眼睛闭合程度
+        base_confidence = min(0.9, max(0.6, (EAR_THRESHOLD - ear) / EAR_THRESHOLD))
+
+        # 根据其他特征调整置信度
+        if head_down:
+            base_confidence += 0.1
+        if head_tilted:
+            base_confidence += 0.05
+        if mouth_open:
+            base_confidence += 0.05
+
+        # 根据连续帧数调整置信度
+        frame_confidence_bonus = min(0.1, sleep_frame_counters[person_id] * 0.02)
+
+        confidence = min(0.95, base_confidence + frame_confidence_bonus)
+    else:
+        confidence = 0.0
+
+    return is_sleeping, sleeping_indicators, {
+        'ear': ear,
+        'mar': mar,
+        'pitch': pitch,
+        'yaw': yaw,
+        'roll': roll,
+        'consecutive_frames': sleep_frame_counters[person_id],
+        'confidence': confidence
+    }
 
 import numpy as np
 
@@ -690,20 +887,24 @@ def init_events_db():
 init_events_db()
 
 def process_frame_async(frame, stream_id):
-    """异步处理单帧的人脸识别和行为检测"""
+    """平衡的异步处理单帧函数"""
     try:
-        # 综合模式：同时进行人脸识别和行为检测
+        # 行为检测
         behaviors = detect_behaviors(frame)
 
-        # 人脸识别
+        # 人脸识别和睡觉检测
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = detector(gray, 1)
 
         registered_face_areas = []
         face_results = []
+        sleep_detections = []
 
         for face in faces:
             shape = sp(frame, face)
+            shape_np = np.array([(shape.part(i).x, shape.part(i).y) for i in range(68)])
+
+            # 先进行人脸识别以获取person_id
             face_encoding = np.array(facerec.compute_face_descriptor(frame, shape))
             matches = face_recognition.compare_faces(list(registered_faces.values()), face_encoding,
                                                      tolerance=0.4)
@@ -712,8 +913,8 @@ def process_frame_async(frame, stream_id):
             name = "Stranger"
             color = (0, 0, 255)
             is_registered = False
-            # 添加陌生人置信度计算
             stranger_confidence = 0.0
+            person_id = "Stranger"
 
             if True in matches:
                 best_match_index = np.argmin(face_distances)
@@ -722,6 +923,7 @@ def process_frame_async(frame, stream_id):
                     name = student_id
                     color = (0, 255, 0)
                     is_registered = True
+                    person_id = student_id
 
                     face_bbox = [face.left(), face.top(), face.right(), face.bottom()]
                     registered_face_areas.append({
@@ -729,26 +931,43 @@ def process_frame_async(frame, stream_id):
                         'bbox': face_bbox
                     })
             else:
-                # 计算陌生人置信度 (距离越小，置信度越高)
                 if len(face_distances) > 0:
                     min_distance = np.min(face_distances)
-                    # 将距离转换为置信度 (距离越大，越可能是陌生人)
-                    # 使用tolerance=0.4作为基准，距离大于0.4的认为是陌生人
                     stranger_confidence = min(1.0, max(0.0, (min_distance - 0.4) / 0.6))
                 else:
-                    stranger_confidence = 1.0  # 如果没有注册人脸，置信度为1
+                    stranger_confidence = 1.0
+
+            # 使用person_id进行睡觉检测
+            is_sleeping, sleep_indicators, sleep_metrics = is_sleeping_pose(shape_np, frame.shape, person_id)
+
+            # 只有确认睡觉时才添加到检测结果
+            if is_sleeping:
+                face_bbox = [face.left(), face.top(), face.right(), face.bottom()]
+                sleep_detections.append({
+                    'class': '睡觉',
+                    'confidence': sleep_metrics['confidence'],
+                    'bbox': face_bbox,
+                    'sleep_indicators': sleep_indicators,
+                    'sleep_metrics': sleep_metrics
+                })
 
             face_results.append({
                 'bbox': [face.left(), face.top(), face.right(), face.bottom()],
                 'name': name,
                 'color': color,
                 'is_registered': is_registered,
-                'stranger_confidence': stranger_confidence  # 添加陌生人置信度
+                'stranger_confidence': stranger_confidence,
+                'is_sleeping': is_sleeping,
+                'sleep_indicators': sleep_indicators if is_sleeping else [],
+                'sleep_metrics': sleep_metrics if is_sleeping else {}
             })
+
+        # 将睡觉检测结果合并到行为检测结果中
+        all_behaviors = behaviors + sleep_detections
 
         # 为行为检测结果关联用户信息
         enhanced_behaviors = []
-        for behavior in behaviors:
+        for behavior in all_behaviors:
             behavior_bbox = behavior['bbox']
             behavior_copy = behavior.copy()
 
@@ -768,7 +987,7 @@ def process_frame_async(frame, stream_id):
                         overlap_ratio = calculate_overlap_ratio(behavior_bbox, face_result['bbox'])
                         if overlap_ratio > 0.1:
                             associated_user = "Stranger"
-                            stranger_confidence = face_result['stranger_confidence']  # 获取陌生人置信度
+                            stranger_confidence = face_result['stranger_confidence']
                             break
 
             if associated_user:
@@ -874,47 +1093,74 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    """检查是否存在异常行为，添加去重机制"""
+    """平衡的异常条件检查"""
     bad_behaviors = {"玩手机", "睡觉", "手机"}
     current_time = time.time()
     current_active_keys = set()
 
     for behavior in behaviors:
+        # 针对不同行为设置合适的阈值
+        if behavior['class'] == '睡觉':
+            threshold = 0.6  # 睡觉阈值适中
+        elif behavior['class'] in ["玩手机", "手机"]:
+            threshold = 0.5  # 玩手机阈值保持较低，确保检测敏感
+        else:
+            threshold = 0.6  # 其他行为默认阈值
+
         # 检查异常行为
-        if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
+        if behavior['class'] in bad_behaviors and behavior['confidence'] > threshold:
             student_id = behavior.get('student_id', 'Unknown')
             event_key = f"{stream_id}_{student_id}_{behavior['class']}"
             current_active_keys.add(event_key)
 
             # 检查冷却时间
             if (not event_active.get(event_key, False) and
-                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
+                    (event_key not in event_cooldown or (
+                            current_time - event_cooldown[event_key]) > cooldown_duration)):
                 event_active[event_key] = True
                 event_cooldown[event_key] = current_time
                 return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
 
-        # 检查陌生人 - 添加去重
+        # 检查陌生人
         if behavior.get('student_id') == 'Stranger':
-            # 获取陌生人置信度，如果没有则默认为1.0
             stranger_confidence = behavior.get('stranger_confidence', 1.0)
-
-            # 只有置信度大于阈值的陌生人才会被记录
             if stranger_confidence > stranger_threshold:
                 event_key = f"{stream_id}_Stranger"
                 current_active_keys.add(event_key)
 
-            # 检查冷却时间
-            if (not event_active.get(event_key, False) and
-                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
-                event_active[event_key] = True
-                event_cooldown[event_key] = current_time
-                return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
-    #标记已消失的异常行为为非活跃
+                if (not event_active.get(event_key, False) and
+                        (event_key not in event_cooldown or (
+                                current_time - event_cooldown[event_key]) > cooldown_duration)):
+                    event_active[event_key] = True
+                    event_cooldown[event_key] = current_time
+                    return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
+
+    # 标记已消失的异常行为为非活跃
     for key in list(event_active.keys()):
         if key not in current_active_keys:
             event_active[key] = False
 
     return False, None, None, None, None
+
+
+# 清理函数，用于重置计数器（可选）
+def reset_sleep_counters():
+    """重置睡觉帧计数器"""
+    global sleep_frame_counters
+    sleep_frame_counters.clear()
+
+
+# 清理长时间未见的person_id计数器（可选）
+def cleanup_old_counters(current_person_ids):
+    """清理长时间未见的person_id的计数器"""
+    global sleep_frame_counters
+    keys_to_remove = []
+    for person_id in sleep_frame_counters:
+        if person_id not in current_person_ids:
+            keys_to_remove.append(person_id)
+
+    for key in keys_to_remove:
+        del sleep_frame_counters[key]
 
 
 # 修改gen_frames函数，在combined模式中添加异常检测
@@ -1177,7 +1423,6 @@ def combined_feed(stream_id):
 
 
 import requests
-import json
 DEEPSEEK_API_KEY = "sk-abe4c63cca9f466cb2f2dd789c3f3ffe"  # 替换为你的实际密钥
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
