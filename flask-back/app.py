@@ -28,13 +28,10 @@ facerec = dlib.face_recognition_model_v1('./dat/dlib_face_recognition_resnet_mod
 # 初始化YOLOv11行为检测模型
 behavior_model_path = './model/best.onnx'
 behavior_session = None
-# 行为类别统一配置
 behavior_classes = [
-    '举手', '抬头', '阅读', '直立',
-    '玩手机', '睡觉', '弯腰', '转头'
+    '玩手机', '弯腰', '书', '玩手机', '举手', '手机',
+    '抬头', '阅读', '睡觉', '转头', '直立', '玩手机'
 ]
-good_behaviors = {"举手", "抬头", "阅读", "直立"}
-bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
 
 
 def load_behavior_model():
@@ -215,7 +212,8 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立"}
-    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -223,6 +221,8 @@ def draw_chinese_boxes(frame, behaviors, font_path):
         # 框颜色与下方卡片一致
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -287,6 +287,7 @@ def face_delete(student_id):
             return {'error': 'Face not found'}, 404
 
 
+
 def boxes_overlap(box1, box2):
     """检查两个矩形框是否重叠"""
     x1_min, y1_min, x1_max, y1_max = box1
@@ -344,7 +345,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         small_font = ImageFont.load_default()
 
     good_behaviors = {"举手", "抬头", "阅读", "直立", "书"}
-    bad_behaviors = {"玩手机", "睡觉", "手机", "弯腰", "转头"}
+    neutral_behaviors = {"弯腰", "转头"}
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
 
     for det in behaviors:
         x1, y1, x2, y2 = det['bbox']
@@ -362,6 +364,8 @@ def draw_enhanced_chinese_boxes(frame, behaviors, font_path):
         # 框颜色
         if det['class'] in good_behaviors:
             color = (0, 200, 0)  # 绿色
+        elif det['class'] in neutral_behaviors:
+            color = (255, 200, 0)  # 黄色
         elif det['class'] in bad_behaviors:
             color = (220, 0, 0)  # 红色
         else:
@@ -622,15 +626,8 @@ cooldown_duration = 5  # 30秒冷却时间
 events_db_file = 'anomaly_events.db'
 video_buffer_size = 150  # 5秒 * 30fps = 150帧
 stream_buffers = {}  # 存储每个流的视频缓冲区
-anomaly_threshold = 0.6 
-stranger_threshold = 0.6 
-#anomaly_threshold = 0.6  # 降低异常行为置信度阈值，便于测试
-#stranger_threshold = 0.6 # 降低陌生人置信度阈值，便于测试
-
-# 添加全局变量分别管理陌生人和普通异常行为的活跃状态
-active_bad_behaviors = {}  # {(stream_id, student_id, behavior_class): bool}
-active_strangers = {}      # {(stream_id): bool}
-
+anomaly_threshold = 0.6  # 异常行为置信度阈值
+stranger_threshold = 0.6
 
 # 初始化数据库
 def init_events_db():
@@ -666,6 +663,22 @@ def init_events_db():
                        handled_at
                        TEXT,
                        handler
+                       TEXT
+                   )
+                   ''')
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS daily_reports
+                   (
+                       id
+                       TEXT
+                       PRIMARY
+                       KEY,
+                       report_date
+                       TEXT
+                       UNIQUE,
+                       report_content
+                       TEXT,
+                       created_at
                        TEXT
                    )
                    ''')
@@ -832,6 +845,7 @@ def save_video_clip(stream_id, frames, event_id):
 
 
 def record_anomaly_event(stream_id, event_type, behavior_class, confidence, student_id, frames):
+    """记录异常事件"""
     try:
         event_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
@@ -853,41 +867,53 @@ def record_anomaly_event(stream_id, event_type, behavior_class, confidence, stud
         conn.commit()
         conn.close()
 
+        print(f"记录异常事件: {event_type} - {behavior_class} - {student_id}")
+
     except Exception as e:
-        pass
+        print(f"记录异常事件失败: {e}")
 
 
 def check_anomaly_conditions(behaviors, stream_id):
-    bad_behaviors = {"玩手机", "睡觉", "弯腰", "转头"}
+    """检查是否存在异常行为，添加去重机制"""
+    bad_behaviors = {"玩手机", "睡觉", "手机"}
     current_time = time.time()
-    current_active_bad = set()
-    current_active_stranger = set()
+    current_active_keys = set()
 
     for behavior in behaviors:
         # 检查异常行为
         if behavior['class'] in bad_behaviors and behavior['confidence'] > anomaly_threshold:
             student_id = behavior.get('student_id', 'Unknown')
-            key = (stream_id, student_id, behavior['class'])
-            current_active_bad.add(key)
-            if not active_bad_behaviors.get(key, False):
-                active_bad_behaviors[key] = True
+            event_key = f"{stream_id}_{student_id}_{behavior['class']}"
+            current_active_keys.add(event_key)
+
+            # 检查冷却时间
+            if (not event_active.get(event_key, False) and
+                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
+                event_active[event_key] = True
+                event_cooldown[event_key] = current_time
                 return True, 'bad_behavior', behavior['class'], behavior['confidence'], student_id
-        # 检查陌生人
+
+        # 检查陌生人 - 添加去重
         if behavior.get('student_id') == 'Stranger':
+            # 获取陌生人置信度，如果没有则默认为1.0
             stranger_confidence = behavior.get('stranger_confidence', 1.0)
+
+            # 只有置信度大于阈值的陌生人才会被记录
             if stranger_confidence > stranger_threshold:
-                key = stream_id
-                current_active_stranger.add(key)
-                if not active_strangers.get(key, False):
-                    active_strangers[key] = True
-                    return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
-    # 标记消失的异常行为为非活跃
-    for key in list(active_bad_behaviors.keys()):
-        if key not in current_active_bad:
-            active_bad_behaviors[key] = False
-    for key in list(active_strangers.keys()):
-        if key not in current_active_stranger:
-            active_strangers[key] = False
+                event_key = f"{stream_id}_Stranger"
+                current_active_keys.add(event_key)
+
+            # 检查冷却时间
+            if (not event_active.get(event_key, False) and
+                    (event_key not in event_cooldown or (current_time - event_cooldown[event_key]) > cooldown_duration)):
+                event_active[event_key] = True
+                event_cooldown[event_key] = current_time
+                return True, 'stranger', behavior['class'], stranger_confidence, 'Stranger'
+    #标记已消失的异常行为为非活跃
+    for key in list(event_active.keys()):
+        if key not in current_active_keys:
+            event_active[key] = False
+
     return False, None, None, None, None
 
 
@@ -1031,23 +1057,16 @@ def get_anomaly_events():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         status = request.args.get('status', 'all')
-        event_type = request.args.get('event_type', 'all')
 
         conn = sqlite3.connect(events_db_file)
         cursor = conn.cursor()
 
         # 构建查询条件
-        where_clauses = []
+        where_clause = ""
         params = []
         if status != 'all':
-            where_clauses.append("status = ?")
+            where_clause = "WHERE status = ?"
             params.append(status)
-        if event_type != 'all':
-            where_clauses.append("event_type = ?")
-            params.append(event_type)
-        where_clause = ""
-        if where_clauses:
-            where_clause = "WHERE " + " AND ".join(where_clauses)
 
         # 获取总数
         cursor.execute(f"SELECT COUNT(*) FROM anomaly_events {where_clause}", params)
@@ -1157,7 +1176,394 @@ def combined_feed(stream_id):
         return jsonify({'error': 'Failed to process combined video stream'}), 500
 
 
-# 在现有代码基础上添加以下代码段
+import requests
+import json
+DEEPSEEK_API_KEY = "sk-abe4c63cca9f466cb2f2dd789c3f3ffe"  # 替换为你的实际密钥
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+
+
+
+# 辅助格式化函数
+def format_stats(stats):
+    if not stats: return "无异常事件"
+    return "\n".join([f"- {etype}/{bclass}: {count}次" for etype, bclass, count in stats])
+
+
+def format_pending_events(events):
+    if not events:
+        return "无待处理事件"
+
+    formatted_events = []
+    for bclass, sid, time in events:
+        try:
+            # 处理ISO时间格式 2025-07-16T09:34:12.697954
+            if 'T' in time:
+                # 分割日期和时间部分
+                date_part, time_part = time.split('T')
+                # 提取时间部分（去掉微秒）
+                time_only = time_part.split('.')[0]  # 09:34:12
+            else:
+                # 如果是其他格式，尝试空格分割
+                parts = time.split(' ')
+                if len(parts) >= 2:
+                    time_only = parts[1]
+                else:
+                    time_only = time  # 如果格式不对，直接使用原时间
+
+            formatted_events.append(f"- {bclass} (学生:{sid} @ {time_only})")
+        except Exception as e:
+            # 如果时间解析失败，使用原时间
+            formatted_events.append(f"- {bclass} (学生:{sid} @ {time})")
+
+    return "\n".join(formatted_events)
+
+
+# 在你的 Flask 应用中添加以下代码
+
+@app.route('/generate_daily_report', methods=['POST'])
+def generate_daily_report():
+    conn = None
+    try:
+        # 获取请求数据
+        data = request.get_json() or {}
+
+        # 如果指定了日期，使用指定日期；否则使用前一天
+        if 'date' in data and data['date']:
+            try:
+                # 验证日期格式
+                report_date = datetime.strptime(data['date'], '%Y-%m-%d').strftime('%Y-%m-%d')
+            except ValueError:
+                return jsonify({'error': '日期格式错误，请使用 YYYY-MM-DD 格式'}), 400
+        else:
+            # 默认使用前一天
+            report_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        conn = sqlite3.connect(events_db_file)
+        cursor = conn.cursor()
+
+        # 检查是否已存在该日期的报告
+        cursor.execute("SELECT id FROM daily_reports WHERE report_date=?", (report_date,))
+        existing_report = cursor.fetchone()
+
+        # 如果请求中包含 force=true，则删除已存在的报告
+        if existing_report and data.get('force', False):
+            cursor.execute("DELETE FROM daily_reports WHERE report_date=?", (report_date,))
+            conn.commit()
+        elif existing_report:
+            return jsonify({'error': '该日期的报告已存在'}), 409
+
+        # 调试：先查看数据库中所有记录的时间格式
+        cursor.execute("SELECT created_at FROM anomaly_events LIMIT 5")
+        sample_times = cursor.fetchall()
+        print(f"数据库中的时间格式示例: {sample_times}")
+
+        # 使用 LIKE 查询匹配指定日期的记录
+        date_pattern = report_date + "%"  # 匹配 YYYY-MM-DD% 的所有记录
+
+        # 获取指定日期的统计数据
+        cursor.execute('''
+                       SELECT event_type, behavior_class, COUNT(*) as count
+                       FROM anomaly_events
+                       WHERE created_at LIKE ?
+                       GROUP BY event_type, behavior_class
+                       ORDER BY count DESC
+                       ''', (date_pattern,))
+        stats = cursor.fetchall()
+
+        print(f"查询到的统计数据: {stats}")  # 调试输出
+
+        # 获取指定日期的未处理事件
+        cursor.execute('''
+                       SELECT behavior_class, student_id, timestamp
+                       FROM anomaly_events
+                       WHERE status='pending' AND created_at LIKE ?
+                       ORDER BY created_at DESC
+                           LIMIT 5
+                       ''', (date_pattern,))
+        pending_events = cursor.fetchall()
+
+        print(f"待处理事件: {pending_events}")  # 调试输出
+
+        # 如果没有查到数据，尝试其他格式
+        if not stats:
+            # 尝试斜杠格式
+            alt_date_pattern = report_date.replace('-', '/') + "%"
+            print(f"尝试斜杠格式: {alt_date_pattern}")
+
+            cursor.execute('''
+                           SELECT event_type, behavior_class, COUNT(*) as count
+                           FROM anomaly_events
+                           WHERE created_at LIKE ?
+                           GROUP BY event_type, behavior_class
+                           ORDER BY count DESC
+                           ''', (alt_date_pattern,))
+            stats = cursor.fetchall()
+
+            cursor.execute('''
+                           SELECT behavior_class, student_id, timestamp
+                           FROM anomaly_events
+                           WHERE status='pending' AND created_at LIKE ?
+                           ORDER BY created_at DESC
+                               LIMIT 5
+                           ''', (alt_date_pattern,))
+            pending_events = cursor.fetchall()
+
+        # 计算总事件数
+        total_events = sum(count for _, _, count in stats)
+
+        # 构建提示词
+        prompt = f"""
+[角色]
+你是一个专业的教室监控系统分析师，负责生成指定日期的监控日报。
+
+[原始数据]
+统计日期：{report_date}
+总事件数：{total_events}
+异常事件统计：
+{format_stats(stats)}
+待处理事件（前5条）：
+{format_pending_events(pending_events)}
+
+[思维链]
+1. 首先概述整体情况：总事件数、主要问题类型
+2. 分析事件分布：按事件类型和行为分类统计
+3. 重点提醒：未处理事件的数量和典型案例
+4. 提出建议：基于分析给出管理建议
+5. 使用专业但易懂的语言，保持报告简洁
+
+[报告格式]
+=== {report_date} 教室监控日报 ===
+[概览]
+<总体情况描述>
+
+[数据分析]
+<详细分析>
+
+[待处理事件]
+<重点提醒>
+
+[管理建议]
+<具体建议>
+
+[备注]
+{f"该日期共检测到 {total_events} 起异常事件" if total_events > 0 else "该日期未检测到异常事件，课堂秩序良好"}
+"""
+
+        # 调用DeepSeek API
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "你是一个专业的教室监控系统分析师"},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 800
+        }
+
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload)
+
+        if response.status_code != 200:
+            error_msg = response.json().get('message', '未知错误')
+            return jsonify({'error': f'DeepSeek API调用失败: {error_msg}'}), 500
+
+        response_data = response.json()
+
+        if not response_data.get('choices'):
+            return jsonify({'error': 'DeepSeek API返回的响应中没有choices字段'}), 500
+
+        report_content = response_data["choices"][0]["message"]["content"].strip()
+
+        # 保存报告
+        report_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        cursor.execute('''
+                       INSERT INTO daily_reports (id, report_date, report_content, created_at)
+                       VALUES (?, ?, ?, ?)
+                       ''', (report_id, report_date, report_content, created_at))
+        conn.commit()
+
+        return jsonify({
+            'id': report_id,
+            'date': report_date,
+            'content': report_content,
+            'debug_info': {
+                'stats_count': len(stats),
+                'pending_count': len(pending_events),
+                'total_events': total_events,
+                'query_pattern': date_pattern
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'生成报告失败: {str(e)}'}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+# 添加一个新的端点来获取可用的日期范围
+@app.route('/available_dates', methods=['GET'])
+def get_available_dates():
+    """获取有数据的日期范围，用于前端日期选择器的限制"""
+    try:
+        conn = sqlite3.connect(events_db_file)
+        cursor = conn.cursor()
+
+        # 获取最早和最新的事件日期
+        cursor.execute('''
+                       SELECT MIN(DATE (created_at)) as min_date,
+                              MAX(DATE (created_at)) as max_date,
+                              COUNT(*)               as total_events
+                       FROM anomaly_events
+                       ''')
+
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and result[0]:
+            return jsonify({
+                'min_date': result[0],
+                'max_date': result[1],
+                'total_events': result[2]
+            })
+        else:
+            return jsonify({
+                'min_date': None,
+                'max_date': None,
+                'total_events': 0
+            })
+
+    except Exception as e:
+        return jsonify({'error': f'获取可用日期失败: {str(e)}'}), 500
+
+
+# 添加一个端点来检查指定日期是否有数据
+@app.route('/check_date_data', methods=['POST'])
+def check_date_data():
+    """检查指定日期是否有监控数据"""
+    try:
+        data = request.get_json()
+        check_date = data.get('date')
+
+        if not check_date:
+            return jsonify({'error': '请提供日期'}), 400
+
+        # 验证日期格式
+        try:
+            datetime.strptime(check_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '日期格式错误'}), 400
+
+        conn = sqlite3.connect(events_db_file)
+        cursor = conn.cursor()
+
+        # 检查该日期是否有数据
+        date_pattern = check_date + "%"
+        cursor.execute('''
+                       SELECT COUNT(*)
+                       FROM anomaly_events
+                       WHERE created_at LIKE ?
+                       ''', (date_pattern,))
+
+        event_count = cursor.fetchone()[0]
+
+        # 检查是否已有报告
+        cursor.execute('''
+                       SELECT COUNT(*)
+                       FROM daily_reports
+                       WHERE report_date = ?
+                       ''', (check_date,))
+
+        report_exists = cursor.fetchone()[0] > 0
+
+        conn.close()
+
+        return jsonify({
+            'has_data': event_count > 0,
+            'event_count': event_count,
+            'report_exists': report_exists
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'检查日期数据失败: {str(e)}'}), 500
+
+
+# 添加一个调试接口来查看数据库中的时间格式
+
+@app.route('/daily_reports', methods=['GET'])
+def get_daily_reports():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 5, type=int)
+
+        conn = sqlite3.connect(events_db_file)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM daily_reports")
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * per_page
+        cursor.execute('''
+                       SELECT id, report_date, report_content, created_at
+                       FROM daily_reports
+                       ORDER BY report_date DESC LIMIT ?
+                       OFFSET ?
+                       ''', (per_page, offset))
+
+        reports = []
+        for row in cursor.fetchall():
+            reports.append({
+                'id': row[0],
+                'date': row[1],
+                'content': row[2],
+                'created_at': row[3]
+            })
+
+        return jsonify({
+            'reports': reports,
+            'total': total,
+            'page': page,
+            'per_page': per_page
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'获取报告失败: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/daily_reports/<report_id>', methods=['DELETE'])
+def delete_daily_report(report_id):
+    """删除指定的日报"""
+    try:
+        conn = sqlite3.connect(events_db_file)
+        cursor = conn.cursor()
+
+        # 检查报告是否存在
+        cursor.execute("SELECT id FROM daily_reports WHERE id = ?", (report_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'error': '报告不存在'}), 404
+
+        # 删除报告
+        cursor.execute("DELETE FROM daily_reports WHERE id = ?", (report_id,))
+        conn.commit()
+        conn.close()
+
+        return jsonify({'message': '报告删除成功'})
+
+    except Exception as e:
+        return jsonify({'error': f'删除报告失败: {str(e)}'}), 500
+
+
+# 多线程处理危险区域
 
 import json
 import math
@@ -1166,8 +1572,7 @@ import threading
 import time
 from collections import defaultdict
 import queue
-import concurrent.futures
-from threading import Lock
+
 # 危险区域相关的全局变量
 danger_zones = {}  # 存储每个摄像头的危险区域配置
 danger_zone_config_file = 'danger_zones.json'
