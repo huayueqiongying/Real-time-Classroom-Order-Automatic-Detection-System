@@ -19,7 +19,8 @@
       <!-- 左侧视频区域 -->
       <div class="video-section">
         <div class="video-container">
-          <div class="video-wrapper" ref="videoWrapper"@click="handleVideoClick" @contextmenu="handleVideoRightClick">
+          <!-- 移除了 @click 和 @contextmenu 事件绑定 -->
+          <div class="video-wrapper" ref="videoWrapper">
             <img
               :src="videoFeedUrl"
               alt="危险区域检测视频流"
@@ -268,7 +269,7 @@ export default {
   data() {
     return {
       baseUrl: 'http://127.0.0.1:5000',
-      streamId: '78',
+      streamId: '123',
       isLoading: true,
       hasError: false,
       errorMessage: '',
@@ -334,7 +335,6 @@ export default {
         console.error('加载配置失败:', error);
       }
     },
-
 
     // 保存配置
     async saveConfig() {
@@ -404,22 +404,28 @@ export default {
     // 绑定绘制事件
     bindDrawingEvents() {
       this.$nextTick(() => {
-        const videoElement = this.$el.querySelector('.video-stream');
-        if (videoElement) {
-          videoElement.addEventListener('click', this.handleVideoClick);
-          videoElement.addEventListener('contextmenu', this.handleVideoRightClick);
+        const videoWrapper = this.$refs.videoWrapper;
+        if (videoWrapper) {
+          // 确保先移除之前的事件监听器（防止重复绑定）
+          videoWrapper.removeEventListener('click', this.handleVideoClick);
+          videoWrapper.removeEventListener('contextmenu', this.handleVideoRightClick);
+
+          // 重新绑定事件
+          videoWrapper.addEventListener('click', this.handleVideoClick);
+          videoWrapper.addEventListener('contextmenu', this.handleVideoRightClick);
         }
       });
     },
 
     // 解绑绘制事件
     unbindDrawingEvents() {
-      const videoElement = this.$el.querySelector('.video-stream');
-      if (videoElement) {
-        videoElement.removeEventListener('click', this.handleVideoClick);
-        videoElement.removeEventListener('contextmenu', this.handleVideoRightClick);
+      const videoWrapper = this.$refs.videoWrapper;
+      if (videoWrapper) {
+        videoWrapper.removeEventListener('click', this.handleVideoClick);
+        videoWrapper.removeEventListener('contextmenu', this.handleVideoRightClick);
       }
     },
+
     // 计算区域中心点（用于显示区域名称）
     getZoneCenter(polygon) {
       if (polygon.length === 0) return [0, 0];
@@ -430,33 +436,44 @@ export default {
       return [sumX / polygon.length, sumY / polygon.length];
     },
 
-    // 修改处理视频点击方法，添加视觉反馈
+    // 处理视频点击
     handleVideoClick(event) {
       if (!this.isDrawing) return;
 
+      // 阻止事件冒泡，防止重复处理
+      event.stopPropagation();
 
-      // 获取视频元素的实际尺寸和位置
-      const videoElement = this.$el.querySelector('.video-stream');
-      if (!videoElement) return;
-
-      const rect = event.target.getBoundingClientRect();
+      // 获取点击位置相对于videoWrapper的坐标
+      const rect = this.$refs.videoWrapper.getBoundingClientRect();
       const x = Math.round(event.clientX - rect.left);
       const y = Math.round(event.clientY - rect.top);
+
       // 确保坐标在视频范围内
       if (x >= 0 && x < rect.width && y >= 0 && y < rect.height) {
         this.currentPolygon.push([x, y]);
-        console.log('添加点:', [x, y]);
+        console.log('添加点:', [x, y], '当前点数:', this.currentPolygon.length);
       }
 
       // 添加点击反馈
       this.showClickFeedback(x, y);
     },
+
     // 添加点击反馈效果
     showClickFeedback(x, y) {
       const feedback = document.createElement('div');
       feedback.className = 'click-feedback';
-      feedback.style.left = x + 'px';
-      feedback.style.top = y + 'px';
+      feedback.style.cssText = `
+        position: absolute;
+        left: ${x}px;
+        top: ${y}px;
+        width: 12px;
+        height: 12px;
+        background: #3498db;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 1000;
+        animation: clickFeedback 0.6s ease-out forwards;
+      `;
 
       const videoWrapper = this.$refs.videoWrapper;
       videoWrapper.appendChild(feedback);
@@ -474,6 +491,7 @@ export default {
       if (!this.isDrawing) return;
 
       event.preventDefault();
+      event.stopPropagation();
       this.completeDrawing();
     },
 

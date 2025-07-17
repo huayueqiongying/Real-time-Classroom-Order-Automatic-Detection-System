@@ -39,6 +39,13 @@
         <h3>危险区域检测</h3>
         <p>监控教室危险区域活动</p >
       </router-link>
+
+
+      <router-link to="/ai-daily-report" class="function-card">
+        <div class="card-icon">📄</div>
+        <h3>监控日报</h3>
+        <p>查看专业分析的监控日报</p>
+      </router-link>
     </div>
   </div>
 </template>

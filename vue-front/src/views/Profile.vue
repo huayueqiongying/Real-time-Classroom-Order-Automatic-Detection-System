@@ -142,6 +142,35 @@ export default {
       }
       this.previewUrl = URL.createObjectURL(this.selectedFile);
     },
+    // 在methods中添加新的上传照片方法
+    async uploadPhoto() {
+  if (!this.selectedFile || !this.currentUserId) {
+    throw new Error('缺少图片或用户ID');
+  }
+
+  try {
+    // 创建FormData对象
+    const formData = new FormData();
+    formData.append('image', this.selectedFile);
+    formData.append('userId', this.currentUserId);
+
+    const response = await axios.post('http://localhost:3000/api/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
+    if (response.data.success) {
+      console.log('照片上传成功:', response.data);
+      return response.data;
+    } else {
+      throw new Error(response.data.message || '照片上传失败');
+    }
+  } catch (error) {
+    console.error('照片上传失败:', error);
+    throw error;
+  }
+},
 
     async saveUserToDatabase() {
       try {
@@ -210,7 +239,6 @@ export default {
     try {
       // 1. 先进行人脸注册
       await this.registerFace();
-
       // 2. 保存用户信息到数据库 (你现有的逻辑)
       await this.saveUserToDatabase();
 

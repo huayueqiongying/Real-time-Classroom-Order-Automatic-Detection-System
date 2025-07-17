@@ -79,7 +79,7 @@ export default {
   data() {
     return {
       baseUrl: 'http://127.0.0.1:5000',
-      streamId: '1',
+      streamId: '123',
       selectedMode: 'combined', // 默认使用综合模式
       isLoading: true,
       hasError: false,
