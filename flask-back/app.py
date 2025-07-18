@@ -824,7 +824,7 @@ events_db_file = 'anomaly_events.db'
 video_buffer_size = 150  # 5秒 * 30fps = 150帧
 stream_buffers = {}  # 存储每个流的视频缓冲区
 anomaly_threshold = 0.6  # 异常行为置信度阈值
-stranger_threshold = 0.6
+stranger_threshold = 0.1
 
 # 初始化数据库
 def init_events_db():
@@ -2130,7 +2130,7 @@ def draw_danger_results_on_frame(frame, results, stream_id, font_path):
     try:
         if results:
             # 绘制危险区域
-            frame = draw_danger_zones(frame, stream_id)
+            #frame = draw_danger_zones(frame, stream_id)
 
             # 绘制行为检测结果
             frame = draw_enhanced_chinese_boxes(frame, results['enhanced_behaviors'], font_path)
